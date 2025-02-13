@@ -1,0 +1,26 @@
+services:
+  redis:
+    image: redis/redis-stack-server:latest
+    ports:
+      - "6379:6379"
+
+  celery:
+    build: ./app
+    command: celery -A tasks worker -l info --uid=nobody
+    depends_on:
+      - redis
+      - web
+    environment:
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+  web:
+    build: .
+    command: flask --debug --app app run --host=0.0.0.0
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_ENV=development
