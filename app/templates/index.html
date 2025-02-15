@@ -1,0 +1,588 @@
+<html>
+<head>
+    <title>outbox cn4m</title>  
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="{{ url_for('static', filename='tailwindcss3.4.3.js') }}"></script>
+    <link href="{{ url_for('static', filename='animate.4.1.1.min.css') }}" rel="stylesheet">
+
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='logos/apple-touch-icon.png') }}">
+	<link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='logos/favicon-32x32.png') }}">
+	<link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='logos/favicon-16x16.png') }}">
+
+    <style>
+        .progress {
+            width: 100%;
+            text-align: center;
+        }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        clifford: '#da373d',
+                    }
+                }
+            },
+            fontFamily: {
+                sans: ['Merriweather', 'sans-serif'],
+                serif: ['Merriweather', 'serif'],
+            },
+        }
+    </script>
+    
+</head>
+<body class="bg-zinc-900 text-slate-100 font-sans leading-normal tracking-normal">
+
+	<div class="mx-auto overflow-hidden md:max-w-7xl mt-6 md:flex">
+    	<img class="max-h-20" src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}">
+	</div>
+
+    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
+        <div class="px-5 py-4">
+
+            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">1. check assets</div>
+
+            <div class="grid grid-flow-col auto-cols">
+                <div class="pr-4">
+                    <button id="check-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 rounded border border-zinc-600">
+                        START
+                    </button>
+                </div>
+
+                <div>
+                    <p class="mt-1 text-slate-300">Scans for and checks assets located in the ingest folder:</p>
+                    <p class="text-slate-500 text-sm">{{ ingest_folder }}</p>
+                    <p id="check_asset_progress" class="text-slate-500 text-sm">Press <i>Start</i> to Begin</p>
+                </div>
+
+            </div>
+
+        </div>
+    </div>
+
+
+    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
+        <div class="px-5 py-4">
+            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">2. review assets</div>
+            <div id="results"></div>
+            <button id="select-all" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
+                SELECT ALL
+            </button>
+            <button id="quarantine-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
+                QUARANTINE SELECTED
+            </button>
+            <button id="move-assets-to-repo" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
+                MOVE UNSELECTED TO REPO
+            </button>
+            <p id="review_asset_progress" class="text-slate-500 text-sm"></p>
+        </div>
+    </div>
+
+
+    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
+        <div class="px-5 py-4">
+            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">3. TRACK ASSETS</div>
+            <button id="track-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
+                PUSH ASSETS TO TRACKER
+            </button>
+            <p id="track_assets_progress" class="text-slate-500 text-sm"></p>
+        </div>
+    </div>
+
+    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
+        <div class="px-5 py-4">
+            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">UTILITIES</div>
+            <button id="make-ingest-folders" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
+                MAKE INGEST FOLDERS (FROM REPO)
+            </button>
+            <p id="utility_progress" class="text-slate-500 text-sm"></p>
+        </div>
+    </div>
+
+
+<!--<script src="//cdnjs.cloudflare.com/ajax/libs/nanobar/0.2.1/nanobar.min.js"></script>-->
+<!--<script src="//cdnjs.cloudflare.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>-->
+<script src="{{ url_for('static', filename='jquery2.1.3.min.js') }}"></script>
+<script>
+
+function hashCode(str) {
+    let hash = 0;
+    for (let i = 0, len = str.length; i < len; i++) {
+        let chr = str.charCodeAt(i);
+        hash = (hash << 5) - hash + chr;
+        hash |= 0; // Convert to 32bit integer
+    }
+    return hash;
+}
+
+function make_ingest_folders() {
+    $.ajax({
+        type: 'POST',
+        url: '/make_ingest_folders',
+        success: function(data, status, request) {
+            status_url = request.getResponseHeader('Location');
+            update_progress('make_ingest_folders', status_url);
+        },
+        error: function(XMLHttpRequest, textStatus, errorThrown) {
+            alert(textStatus + ': ' + errorThrown);
+        }
+    });
+}
+
+
+function track_assets() {
+    $.ajax({
+        type: 'POST',
+        url: '/track_assets',
+        success: function(data, status, request) {
+            status_url = request.getResponseHeader('Location');
+            update_progress('track_assets', status_url);
+        },
+        error: function(XMLHttpRequest, textStatus, errorThrown) {
+            alert(textStatus + ': ' + errorThrown);
+        }
+    });
+}
+
+function check_assets() {
+    //alert('check assets');
+    
+    $.ajax({
+        type: 'POST',
+        url: '/check_assets'
+        
+        /*
+        success: function(data, status, request) {
+            status_url = request.getResponseHeader('Location');
+            update_progress('check_assets', status_url);
+        },
+        error: function(XMLHttpRequest, textStatus, errorThrown) {
+            alert(textStatus + ': ' + errorThrown);
+        }
+        */
+
+    });
+    
+}
+
+
+
+function start_long_task() {
+    // add task status elements
+    div = $('<div class="progress"><div></div><div>0%</div><div>...</div><div>&nbsp;</div></div><hr>');
+    $('#check_asset_progress').append(div);
+
+    // create a progress bar
+    var nanobar = new Nanobar({
+        bg: '#44f',
+        target: div[0].childNodes[0]
+    });
+
+    // send ajax POST request to start background job
+    $.ajax({
+        type: 'POST',
+        url: '/longtask',
+        success: function(data, status, request) {
+            status_url = request.getResponseHeader('Location');
+            update_progress(status_url, nanobar, div[0]);
+        },
+        error: function() {
+            alert('Unexpected error');
+        }
+    });
+}
+
+
+
+
+function update_progress(status_task, status_url) {
+
+    if (status_task == 'check_assets') {
+        // send GET request to status URL
+        $.getJSON(status_url, function(data) {
+            //console.log(JSON.stringify(data))
+            percent = parseInt(data['current'] * 100 / data['total']);
+
+            if (data['state'] == 'PENDING') {
+                message = "Starting Asset Check"
+                update_progress(status_task, status_url);
+            } else if (data['state'] == 'PROGRESS') {
+                if (data['total'] == 0) {
+                    message = null
+                } else {
+                    message = percent + "% Complete - Checking Asset " + data['status']
+                }
+                update_progress(status_task, status_url);
+            }   else if (data['status'] == 'COMPLETE') {
+                message = "Asset Check Complete"
+                asset_table = `
+
+                <div class="grid grid-flow-col auto-cols">
+                <div class="pr-4">
+                <table class="mt-1 text-slate-300 text-xs table-auto text-left">
+                <thead>
+                <tr>
+                <th class="pr-4 py-1"></th>
+                <th class="pr-4">Folder</th>
+                <th class="pr-4">Name</th>
+                <th class="pr-4">Duration</th>
+                <!--<th>Notes</th>-->
+                <th class="pr-4">Codec</th>
+                <th class="pr-4">Width</th>
+                <th class="pr-4">Height</th>
+                <th class="pr-4">FPS</th>
+                <th class="pr-4">Audio</th>
+                <th class="pr-4">Rate</th>
+                <th class="pr-4">Bits</th>
+                <th class="pr-4">Ch</th>
+                <th class="pr-4">Size</th>
+                <!--<th>Created</th>-->
+                <!--<th>Modified</th>-->
+                <!--<th>Processed</th>-->
+                </tr>
+                </thead>
+                <tbody>`
+                
+                for (const [key, value] of Object.entries(data['result'])) {
+                    obj = data['result'][key]
+                    name = (('name' in obj) ? obj['name'] : "")
+                    parent = (('parent' in obj) ? obj['parent'] : "").replace(/ /g, '&nbsp;')
+                    duration = ('duration' in obj) ? obj['duration'] : ""
+                    video_codec = ('video_codec' in obj) ? obj['video_codec'] : ""
+                    width = ('width' in obj) ? obj['width'] : ""
+                    height = ('height' in obj) ? obj['height'] : ""
+                    framerate = ('framerate' in obj) ? obj['framerate'] : ""
+                    audio = ('audio' in obj) ? obj['audio'] : ""
+                    audio_rate = ('audio_rate' in obj) ? obj['audio_rate'] : ""
+                    audio_bits = ('audio_bits' in obj) ? obj['audio_bits'] : ""
+                    audio_channels = ('audio_channels' in obj) ? obj['audio_channels'] : ""
+                    size = ('size' in obj) ? obj['size'] : ""
+
+                    row_id = 
+                    asset_table = asset_table + `
+                    <tr id=row` + hashCode(parent + "\\" + name) + ` class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
+                    <td class="pr-4 py-1"><input class="ml-1" type="checkbox" value="` + String(parent + "\\" + name) + `"></td>
+                    <td class="pr-4">` + parent + `</td>
+                    <td class="pr-4">` + name + `</td>
+                    <td class="pr-4">` + duration + `</td>
+                    <td class="pr-4">` + video_codec + `</td>
+                    <td class="pr-4">` + width + `</td>
+                    <td class="pr-4">` + height + `</td>
+                    <td class="pr-4">` + framerate + `</td>
+                    <td class="pr-4">` + audio + `</td>
+                    <td class="pr-4">` + audio_rate + `</td>
+                    <td class="pr-4">` + audio_bits + `</td>
+                    <td class="pr-4">` + audio_channels + `</td>
+                    <td class="pr-4">` + size + `</td>
+                    </tr>`
+                }
+
+                asset_table = asset_table + `
+                </tbody>
+                </table>
+                </div>                              
+                </div>`
+
+                $('#results').html(asset_table);
+
+            }   else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
+                if ('result' in data) {
+                    message = 'Result: ' + data['result']
+                }   else {
+                    // something unexpected happened
+                    message = 'Result: ' + data['state']
+                }
+            } else {
+                                    // rerun in 2 seconds
+                                    update_progress(status_task, status_url);
+                                    message = null
+                /*
+                setTimeout(function() {
+                    update_progress(status_url);
+                }, 100);
+                */
+            }
+            $('#check_asset_progress').html(message);
+            //console.log(message)
+        });
+
+    } else if (status_task == 'quarantine_assets') {
+        $.getJSON(status_url, function(data) {
+
+            percent = parseInt(data['current'] * 100 / data['total']);
+
+            if (data['state'] == 'PENDING') {
+                message = "Starting Quarantine"
+                update_progress(status_task, status_url);
+            } else if (data['state'] == 'PROGRESS') {
+                if (data['total'] == 0) {
+                    message = null
+                } else {
+                    message = percent + "% Complete - Quarantining Asset " + data['status']
+                }
+                update_progress(status_task, status_url);
+            }   else if (data['status'] == 'COMPLETE') {
+                message = "Quarantine Complete"
+
+                        // remove rows that are still selected
+                        selected_assets = []
+                        $('input:checkbox:checked').each(function() {
+                            selected_assets.push($(this).val());
+                        })
+
+                        for (const asset of selected_assets) {
+                            parent = asset.split("\\")[0]
+                            name = asset.split("\\")[1]
+                            row_id = '#row' + String(hashCode(parent + "\\" + name))
+                            //console.log(row_id)
+                            $(row_id).remove();
+                        }
+
+                    }   else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
+                        if ('result' in data) {
+                            message = 'Result: ' + data['result']
+                        }   else {
+                            // something unexpected happened
+                            message = 'Result: ' + data['state']
+                        }
+                    } else {
+                        update_progress(status_task, status_url);
+                        message = null
+                    }
+
+                    //console.log(JSON.stringify(data))
+                    $('#review_asset_progress').html(message);
+                })
+
+    } else if (status_task == 'move_assets_to_repo') {
+        $.getJSON(status_url, function(data) {
+
+            percent = parseInt(data['current'] * 100 / data['total']);
+
+            if (data['state'] == 'PENDING') {
+                message = "Moving Assets"
+                update_progress(status_task, status_url);
+            } else if (data['state'] == 'PROGRESS') {
+                if (data['total'] == 0) {
+                    message = null
+                } else {
+                    message = percent + "% Complete - Moving Asset " + data['status']
+                }
+                update_progress(status_task, status_url);
+            }   else if (data['status'] == 'COMPLETE') {
+                message = "Assets Moved to Repo"
+
+                // remove rows that are still unselected
+                unselected_assets = []
+                $('input:checkbox:not(:checked)').each(function() {
+                    unselected_assets.push($(this).val());
+                })
+
+                for (const asset of unselected_assets) {
+                    parent = asset.split("\\")[0]
+                    name = asset.split("\\")[1]
+                    row_id = '#row' + String(hashCode(parent + "\\" + name))
+                    //console.log(row_id)
+                    $(row_id).remove();
+                }
+
+            }   else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
+                if ('result' in data) {
+                    message = 'Result: ' + data['result']
+                }   else {
+                    // something unexpected happened
+                    message = 'Result: ' + data['state']
+                }
+            } else {
+                update_progress(status_task, status_url);
+                message = null
+            }
+
+            //console.log(JSON.stringify(data))
+            $('#review_asset_progress').html(message);
+        })
+
+    } else if (status_task == 'track_assets') {
+        $.getJSON(status_url, function(data) {
+
+            percent = parseInt(data['current'] * 100 / data['total']);
+
+            if (data['state'] == 'PENDING') {
+                message = "Tracking Assets"
+                update_progress(status_task, status_url);
+            } else if (data['state'] == 'PROGRESS') {
+                if (data['total'] == 0) {
+                    message = null
+                } else {
+                    message = percent + "% Complete - Tracking Asset " + data['status']
+                }
+                update_progress(status_task, status_url);
+            } else if (data['status'] == 'COMPLETE') {
+                message = "Assets pushed to tracker."
+
+            } else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
+                if ('result' in data) {
+                    message = 'Result: ' + data['result']
+                } else {
+                    // something unexpected happened
+                    message = 'Result: ' + data['state']
+                }
+            } else {
+                update_progress(status_task, status_url);
+                message = null
+            }
+
+            $('#track_assets_progress').html(message);
+        })
+
+    } else if (status_task == 'make_ingest_folders') {
+        $.getJSON(status_url, function(data) {
+
+            percent = parseInt(data['current'] * 100 / data['total']);
+
+            if (data['state'] == 'PENDING') {
+                message = "Creating Folders"
+                update_progress(status_task, status_url);
+            } else if (data['state'] == 'PROGRESS') {
+                if (data['total'] == 0) {
+                    message = null
+                } else {
+                    message = percent + "% Complete - Creating Folder " + data['status']
+                }
+                update_progress(status_task, status_url);
+            } else if (data['status'] == 'COMPLETE') {
+                message = "Ingest Folders Created."
+
+            } else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
+                if ('result' in data) {
+                    message = 'Result: ' + data['result']
+                } else {
+                    // something unexpected happened
+                    message = 'Result: ' + data['state']
+                }
+            } else {
+                update_progress(status_task, status_url);
+                message = null
+            }
+
+            $('#utility_progress').html(message);
+        })
+    }
+
+}
+
+
+
+function quarantine_assets() {
+    selected_assets = []
+    $('input:checkbox:checked').each(function() {
+        selected_assets.push($(this).val());
+    })
+
+                for (const asset of selected_assets) {
+                    parent = asset.split("\\")[0]
+                    name = asset.split("\\")[1]
+                    row_id = '#row' + String(hashCode(parent + "\\" + name))
+                    //console.log(row_id)
+                    $(row_id).remove();
+                }
+    $.ajax({
+        type: 'POST',
+        url: '/quarantine_assets',
+        data: {
+            javascript_data: JSON.stringify(selected_assets)
+        },
+        success: function(data, status, request) {
+            status_url = request.getResponseHeader('Location');
+            update_progress('quarantine_assets', status_url);
+        },
+        error: function(XMLHttpRequest, textStatus, errorThrown) {
+            alert(textStatus + ': ' + errorThrown);
+        }
+    });
+}
+
+function select_all() {
+    unselected_assets = []
+    $('input:checkbox:not(:checked)').each(function() {
+        //unselected_assets.push($(this).val());
+        $(this).prop("checked", true);
+    })
+    /*
+    for (const asset of unselected_assets) {
+        parent = asset.split("\\")[0]
+        name = asset.split("\\")[1]
+        row_id = '#row' + String(hashCode(parent + "\\" + name))
+        //console.log(row_id)
+        $(row_id).prop("checked", true);
+    }
+    */
+}
+
+function move_assets_to_repo() {
+    unselected_assets = []
+    $('input:checkbox:not(:checked)').each(function() {
+        unselected_assets.push($(this).val());
+    })
+
+    $.ajax({
+        type: 'POST',
+        url: '/move_assets_to_repo',
+        data: {
+            javascript_data: JSON.stringify(unselected_assets)
+        },
+        success: function(data, status, request) {
+            status_url = request.getResponseHeader('Location');
+            update_progress('move_assets_to_repo', status_url);
+        },
+        error: function(XMLHttpRequest, textStatus, errorThrown) {
+            alert(textStatus + ': ' + errorThrown);
+        }
+    });
+
+}
+
+
+$(function() {
+    $('#track-assets').click(track_assets);
+});
+
+$(function() {
+    $('#make-ingest-folders').click(make_ingest_folders);
+});
+
+
+$(function() {
+    $('#move-assets-to-repo').click(move_assets_to_repo);
+});
+
+
+$(function() {
+    $('#quarantine-assets').click(quarantine_assets);
+});
+
+$(function() {
+    $('#select-all').click(select_all);
+});
+
+$(function() {
+    $('#check-assets').click(check_assets);
+});
+
+
+
+
+
+
+//      $(function() {
+//          $('#start-bg-job').click(start_long_task);
+//      });
+
+
+
+</script>
+</body>
+</html>

@@ -1,3 +1,5 @@
 Flask
-celery[redis]
+celery
 redis
+pymediainfo
+gspread

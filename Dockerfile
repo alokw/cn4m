@@ -5,24 +5,24 @@ FROM python:3.9-slim
 WORKDIR /app
 
 # Copy only the necessary files first (for better caching)
-COPY requirements.txt ./
+COPY requirements.txt .
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --trusted-host pypi.python.org -r requirements.txt
 
 # Copy the rest of the application files
-COPY . /app
+COPY . .
 
-# Make port 5000 available to the world outside this container
-#EXPOSE 5000
+# Expose Flask's port
+EXPOSE 5000
 
-# Set environment variables
-#ENV FLASK_APP=app.py \
-#    FLASK_ENV=development \
-#    CELERY_BROKER_URL=redis://redis:6379/0 \
-#    CELERY_RESULT_BACKEND=redis://redis:6379/0
+# Run Flask when the container starts
+CMD ["python", "run.py"]
 
-# Run app.py when the container launches
-# CMD ["python", "app.py"]
+#ENV FLASK_APP=app.app
+#ENV FLASK_ENV=development
+
 # Default command to run Flask (can be overridden in docker-compose)
 # CMD ["flask", "--debug", "--app app", "run", "--host=0.0.0.0"]
+# CMD ["flask", "run", "--host=0.0.0.0", "--port=5000", "--debug"]
+# CMD ["python", "app.py"]

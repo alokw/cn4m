@@ -1,8 +1,6 @@
-from celery import Celery
-import os
+from celery import shared_task
 
-celery = Celery('tasks', broker=os.environ.get('CELERY_BROKER_URL'), backend=os.environ.get('CELERY_RESULT_BACKEND'))
-
-@celery.task
-def add(x, y):
+@shared_task
+def add_numbers(x, y):
+    """Simple Celery task that adds two numbers."""
     return x + y

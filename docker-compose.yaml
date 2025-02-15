@@ -1,26 +1,55 @@
 services:
+  web:
+    build: .
+    container_name: flask_app
+    ports:
+      - "5000:5000"  # Map Flask's port to the host
+    depends_on:
+      - redis
+      - worker
+    volumes:
+      - .:/app  # Sync local files with container (useful for development)
+    environment:
+      - FLASK_APP=run.py
+      - FLASK_ENV=development
+      - FLASK_RUN_HOST=0.0.0.0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      #- FLASK_APP=app.py
+      # - FLASK_APP=app:create_app  # ✅ Points to the factory function
+      # - FLASK_RUN_PORT=5000
+      # - FLASK_DEBUG=1
+    env_file:
+      - settings.env
+    # command: ["flask", "run", "--host=0.0.0.0", "--port=5000", "--reload"]
+
   redis:
     image: redis/redis-stack-server:latest
+    container_name: redis_server
     ports:
       - "6379:6379"
 
-  celery:
-    build: ./app
-    command: celery -A tasks worker -l info --uid=nobody
+  worker:
+    build: .
+    container_name: celery_worker
     depends_on:
       - redis
-      - web
     environment:
-      - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    #  - CELERY_IMPORTS = ['app.tasks']
+    #command: ["celery", "-A", "app.celery", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "app:celery", "worker", "--loglevel=info"]
+    #command: ["celery", "-A", "app.celery", "worker", "--loglevel=info", "--uid=nobody"]
+    #command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info", "--uid=nobody"]
 
-  web:
-    build: .
-    command: flask --debug --app app run --host=0.0.0.0
-    ports:
-      - "5000:5000"
-    volumes:
-      - .:/app
+  flower:  # Celery monitoring UI
+    image: mher/flower
+    container_name: flower_monitor
+    depends_on:
+      - redis
+      - worker
     environment:
-      - FLASK_ENV=development
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    ports:
+      - "5555:5555"
