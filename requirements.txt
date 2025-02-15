@@ -1,5 +1,6 @@
 Flask
 celery
 redis
+python-dotenv
 pymediainfo
 gspread

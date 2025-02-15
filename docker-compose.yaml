@@ -15,10 +15,6 @@ services:
       - FLASK_RUN_HOST=0.0.0.0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      #- FLASK_APP=app.py
-      # - FLASK_APP=app:create_app  # ✅ Points to the factory function
-      # - FLASK_RUN_PORT=5000
-      # - FLASK_DEBUG=1
     env_file:
       - settings.env
     # command: ["flask", "run", "--host=0.0.0.0", "--port=5000", "--reload"]
@@ -34,14 +30,13 @@ services:
     container_name: celery_worker
     depends_on:
       - redis
+    volumes:
+      - /Users/outbox/Desktop/cn4m_assets:/cn4m_assets
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    #  - CELERY_IMPORTS = ['app.tasks']
-    #command: ["celery", "-A", "app.celery", "worker", "--loglevel=info"]
     command: ["celery", "-A", "app:celery", "worker", "--loglevel=info"]
     #command: ["celery", "-A", "app.celery", "worker", "--loglevel=info", "--uid=nobody"]
-    #command: ["celery", "-A", "app.tasks", "worker", "--loglevel=info", "--uid=nobody"]
 
   flower:  # Celery monitoring UI
     image: mher/flower

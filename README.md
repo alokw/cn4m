@@ -25,6 +25,13 @@ docker-compose up
 
 
 
+docker ps   #show all running containers
+docker exec -it <container_name> sh   # run a command in a container
+
+
+
+
+
 
 to force rebuild the image with fresh dependencies (need to do if adding requirements)
 docker-compose build --no-cache
@@ -42,6 +49,15 @@ docker-compose up --build -d  # Rebuild with new dependencies
 
 
 
+
+
+
+
 notes for later:
 consider running multiple Celery workers
 docker-compose up --scale worker=3 -d
+
+
+
+
+
