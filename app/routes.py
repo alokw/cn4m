@@ -15,17 +15,37 @@ def run_check_assets():
     task = check_assets.delay()
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
+@main.route('/quarantine_assets', methods=['POST'])
+def run_quarantine_assets():
+    assets = request.form.get('javascript_data')
+    task = quarantine_assets.delay(assets)
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+    #return "done"
+
 @main.route('/approve_assets', methods=['POST'])
 def run_approve_assets():
     assets = request.form.get('javascript_data')
     task = approve_assets.delay(assets)
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
+@main.route('/track_assets', methods=['POST'])
+def run_track_assets():
+    task = track_assets.delay()
+    return "done"
+    #return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
+
+
+
+
+
+'''
 @main.route("/task")
 def run_task():
     """Trigger a Celery task."""
     task = add_numbers.delay(10, 20)
     return jsonify({"task_id": task.id, "status": task.status})
+'''
 
 @main.route('/status/<task_id>')
 def taskstatus(task_id):

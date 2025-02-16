@@ -4,134 +4,61 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <script src="{{ url_for('static', filename='tailwindcss3.4.3.js') }}"></script>
+    <script src="{{ url_for('static', filename='jquery2.1.3.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='bootstrap.bundle.min.js') }}"></script>
     <script src="{{ url_for('static', filename='cn4m.js') }}"></script>
 
-    <link href="{{ url_for('static', filename='animate.4.1.1.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='cn4m.css') }}" rel="stylesheet">
+
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='logos/apple-touch-icon.png') }}">
 	<link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='logos/favicon-32x32.png') }}">
 	<link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='logos/favicon-16x16.png') }}">
 
-    <style>
-        .progress {
-            width: 100%;
-            text-align: center;
-        }
-    </style>
-
 </head>
-<body class="bg-zinc-900 text-slate-100 font-sans leading-normal tracking-normal">
+<body>
 
-	<div class="mx-auto overflow-hidden md:max-w-7xl mt-6 md:flex">
-    	<img class="max-h-20" src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}">
+	<div class="container p-3">
+    	<img class="" src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}">
 	</div>
 
-    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
-        <div class="px-5 py-4">
-
-            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">1. check assets</div>
-
-            <div class="grid grid-flow-col auto-cols">
-                <div class="pr-4">
-                    <button id="check-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 rounded border border-zinc-600">
-                        START
-                    </button>
-                </div>
-
-                <div>
-                    <p class="mt-1 text-slate-300">Scans for and checks assets located in the ingest folder:</p>
-                    <p class="text-slate-500 text-sm">{{ ingest_folder }}</p>
-                    <p id="check_asset_progress" class="text-slate-500 text-sm">Press <i>Start</i> to Begin</p>
-                </div>
-
+    <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
+        <div class="pb-2 text-uppercase fw-semibold obx-orange">1. check assets</div>
+        <div class="row">
+            <div class="col-md-auto">
+                <button id="check-assets" class="obx-button">START</button>
             </div>
-
+            <div class="col fs-7 lh-sm">
+                <span>Scans for and checks newly added assets in the repository.</span><br />
+                <span class="fw-lighter" id="check_asset_progress">Press <i>Start</i> to Begin.</span>
+            </div>
         </div>
     </div>
 
-
-    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
-        <div class="px-5 py-4">
-            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">2. review assets</div>
-            <div id="results"></div>
-            <button id="select-all" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
-                SELECT ALL
-            </button>
-            <button id="unselect-all" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
-                UN-SELECT ALL
-            </button>
-            <button id="quarantine-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
-                QUARANTINE SELECTED
-            </button>
-            <button id="approve-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
-                APPROVE SELECTED
-            </button>
-            <p id="review_asset_progress" class="text-slate-500 text-sm"></p>
-        </div>
+    <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
+        <div class="pb-2 text-uppercase fw-semibold obx-orange">2. review assets</div>
+        <div id="results"></div>
+        <!--<button id="select-all" class="obx-button">SELECT ALL</button>
+        <button id="unselect-all" class="obx-button">UN-SELECT ALL</button>-->
+        <button id="quarantine-assets" class="obx-button">QUARANTINE SELECTED</button>
+        <button id="approve-assets" class="obx-button">APPROVE SELECTED</button><br />
+        <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_progress"></span></div>
     </div>
 
-
-    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
-        <div class="px-5 py-4">
-            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">3. TRACK ASSETS</div>
-            <button id="track-assets" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
-                PUSH ASSETS TO TRACKER
-            </button>
-            <p id="track_assets_progress" class="text-slate-500 text-sm"></p>
-        </div>
+    <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
+        <div class="pb-2 text-uppercase fw-semibold obx-orange">3. track assets</div>
+        <button id="track-assets" class="obx-button">UPDATE GOOGLE SHEET</button><br />
+        <div class="pt-2"><span class="fw-lighter fs-7" id="track_assets_progress"></span></div>
     </div>
-
-    <div class="bg-zinc-800 max-w-md mx-auto rounded-xl shadow-md overflow-hidden md:max-w-7xl mt-6 border border-zinc-600 md:flex">
-        <div class="px-5 py-4">
-            <div class="uppercase tracking-wide text-lg text-orange-300 font-semibold pb-1">UTILITIES</div>
-            <button id="make-ingest-folders" class="bg-zinc-900 min-w-24 hover:bg-zinc-700 text-white text-sm font-bold py-2 mt-2 px-4 rounded border border-zinc-600">
-                MAKE INGEST FOLDERS (FROM REPO)
-            </button>
-            <p id="utility_progress" class="text-slate-500 text-sm"></p>
-        </div>
-    </div>
-
-<script src="{{ url_for('static', filename='jquery2.1.3.min.js') }}"></script>
 
 <script>
 
-$(function() {
-    $('#select-all').click(select_all);
-});
-
-$(function() {
-    $('#unselect-all').click(unselect_all);
-});
-
-$(function() {
-    $('#check-assets').click(check_assets);
-});
-
-$(function() {
-    $('#approve-assets').click(approve_assets);
-});
-
-$(function() {
-    $('#quarantine-assets').click(quarantine_assets);
-});
-
-$(function() {
-    $('#make-ingest-folders').click(make_ingest_folders);
-});
-
-
-/*
-$(function() {
-    $('#move-assets-to-repo').click(move_assets_to_repo);
-});
-*/
-
-
-
-$(function() {
-    $('#track-assets').click(track_assets);
-});
-
+//$(function() { $('#select-all').click(select_all); });
+//$(function() { $('#unselect-all').click(unselect_all); });
+$(function() { $('#check-assets').click(check_assets); });
+$(function() { $('#approve-assets').click(approve_assets); });
+$(function() { $('#quarantine-assets').click(quarantine_assets); });
+$(function() { $('#track-assets').click(track_assets); });
 
 </script>
 </body>

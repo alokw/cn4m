@@ -1,0 +1,45 @@
+body {
+  background-color: #1a1a1a;
+	color: #dddddd;
+}
+
+.obx-orange {
+  color: #F99D38;
+}
+
+.obx-button {
+	/*background-color: #444444;*/
+	background-color: #3a3a3a;
+	/* border: 1px solid #F99D38; */
+	border: 1px solid #606060;
+	border-radius: 6px;
+	color: #dfdfdf;
+	padding: 5px 15px;
+	text-align: center;
+	font-weight: 600;
+	text-decoration: none;
+	display: inline-block;
+	font-size: 0.825em;
+	transition-duration: 0.3s;
+}
+
+.obx-button:hover {
+	border: 1px solid #F99D38;
+}
+
+.fs-7 {
+	  font-size: 0.825em; /* 14px/16=0.875em */
+}
+
+.fs-8 {
+	  font-size: 0.7625em; /* 14px/16=0.875em */
+}
+
+.bg-darkish {
+	/*background-color: #2a2a2a;*/
+	background-color: #222222;
+}
+
+.border-darkish {
+	border: 1px solid #606060;
+}

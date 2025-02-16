@@ -24,6 +24,28 @@ def approve_assets(self, assets):
     return {"current": len(assets_to_approve), "total": len(assets_to_approve), "status": "COMPLETE", "result": assets_to_approve}
 
 
+@celery.task(bind=True)
+def quarantine_assets(self, assets):
+    assets_to_quarantine = json.loads(assets)
+    assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
+    i = 0
+    # move approved assets from unreviewed to untracked
+    for asset in assets_to_quarantine:
+        i = i+1
+        self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_quarantine), 'status': asset})
+        folder = assets["unreviewed_assets"][asset]["folder"]
+        filename = assets["unreviewed_assets"][asset]["name"]
+        src = os.path.join(folder, filename)
+        dest = os.path.join("/cn4m_assets/quarantine", filename)
+        move_files(asset, src, dest)
+        assets["untracked_quar_assets"][asset] = assets["unreviewed_assets"].pop(asset, None)
+        time.sleep(sleep_time)
+
+    write_json_file(assets, "assets.json")
+    return {"current": len(assets_to_quarantine), "total": len(assets_to_quarantine), "status": "COMPLETE", "result": assets_to_quarantine}
+    #return "end"
+
+
 #@shared_task(name="app.tasks.check_assets")
 @celery.task(bind=True)
 #@shared_task
@@ -37,7 +59,8 @@ def check_assets(self):
     untracked_repo_assets = assets["untracked_repo_assets"]
     untracked_quar_assets = assets["untracked_quar_assets"]
     unreviewed_assets = assets["unreviewed_assets"]
-    current_fileids = all_keys = set(tracked_repo_assets.keys()).union(tracked_quar_assets.keys(), untracked_repo_assets.keys(), untracked_quar_assets.keys(), unreviewed_assets.keys())
+    # get all repo and reviewed assets so we dont recheck them (but okay to recheck quarantined ones)
+    current_fileids = all_keys = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys(), unreviewed_assets.keys())
 
     # iterate through each file
     i = 0
@@ -61,8 +84,26 @@ def check_assets(self):
     write_json_file(assets, "assets.json")
 
     return {"current": repo_files_qty, "total": repo_files_qty, "status": "COMPLETE", "result": unreviewed_assets}
-    #return {"status": "Task completed!"}
-    #return unreviewed_assets
+
+
+
+@celery.task(bind=True)
+def track_assets(self):
+    assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
+    total = len(assets["untracked_repo_assets"]) + len(assets["untracked_quar_assets"])
+    #try:
+    sheet = connect_to_google_sheet()
+    setup_google_sheet(sheet)
+    i = update_google_sheet(sheet, "repository", assets["untracked_repo_assets"], total, 0, self)
+    update_google_sheet(sheet, "quarantine", assets["untracked_quar_assets"], total, i, self)
+
+    #except:
+    #    print("unable to update google sheet - check connection and configuration")
+
+    return {"current": total, "total": total, "status": "COMPLETE", "result": "untracked items tracked"}
+
+
+
 
 @shared_task
 def add_numbers(x, y):
@@ -94,7 +135,7 @@ def long_task(self):
 
 
 # Explicitly define what gets imported when using `from app.tasks import *`
-__all__ = ["check_assets", "add_numbers", "long_task", "approve_assets"]
+__all__ = ["check_assets", "add_numbers", "long_task", "approve_assets", "quarantine_assets", "track_assets"]
 
 
 
