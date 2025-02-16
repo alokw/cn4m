@@ -1,6 +1,8 @@
 Flask
 celery
 redis
+watchdog
 python-dotenv
 pymediainfo
 gspread
+xxhash

@@ -1,5 +1,13 @@
 # outbox_cn4m
  
+add assets to the repo
+run a check
+assets discovered for the first time are added to unreviewed_assets
+if they are approved, they are moved to untracked_repo_assets
+if they are quarantined, they are moved to untracked_quar_assets
+when they are tracked (sent to google) they are moved to tracked...assets
+
+
 cd /Users/outbox/Documents/GitHub/outbox_cn4m
 docker compose up (run in foreground)
 docker-compose up -d (run in background)
