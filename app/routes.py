@@ -31,8 +31,8 @@ def run_approve_assets():
 @main.route('/track_assets', methods=['POST'])
 def run_track_assets():
     task = track_assets.delay()
-    return "done"
-    #return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+    #return "done"
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
 
 

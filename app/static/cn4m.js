@@ -15,17 +15,7 @@ function quarantine_assets() {
 }
 
 function track_assets() {
-    $.ajax({
-        type: 'POST',
-        url: '/track_assets',
-        success: function(data, status, request) {
-            status_url = request.getResponseHeader('Location');
-            update_progress('track_assets', status_url);
-        },
-        error: function(XMLHttpRequest, textStatus, errorThrown) {
-            alert(textStatus + ': ' + errorThrown);
-        }
-    });
+  ajax_post_simple('/track_assets')
 }
 
 
@@ -35,7 +25,7 @@ function update_progress(status_task, status_url) {
     case "/approve_assets":
       msg_destination = "#review_asset_progress"
       msg_pending = "Starting Approval"
-      msg_progress = "Approving Asset"
+      msg_progress = "Approving Assets"
       msg_complete = "Approval Complete"
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
       break;
@@ -43,8 +33,16 @@ function update_progress(status_task, status_url) {
     case "/quarantine_assets":
       msg_destination = "#review_asset_progress"
       msg_pending = "Starting Quarantine"
-      msg_progress = "Quarantining Asset"
+      msg_progress = "Quarantining Assets"
       msg_complete = "Quarantine Complete"
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      break;
+
+    case "/track_assets":
+      msg_destination = "#track_assets_progress"
+      msg_pending = "Connecting to Google Sheet"
+      msg_progress = "Tracking Assets"
+      msg_complete = "Assets Pushed to Tracker"
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
       break;
 
@@ -143,40 +141,6 @@ function update_progress(status_task, status_url) {
       });
   }
 
-    if (status_task == 'track_assets') {
-        $.getJSON(status_url, function(data) {
-
-            percent = parseInt(data['current'] * 100 / data['total']);
-
-            if (data['state'] == 'PENDING') {
-                message = "Tracking Assets"
-                update_progress(status_task, status_url);
-            } else if (data['state'] == 'PROGRESS') {
-                if (data['total'] == 0) {
-                    message = null
-                } else {
-                    message = percent + "% Complete - Tracking Asset " + data['status']
-                }
-                update_progress(status_task, status_url);
-            } else if (data['status'] == 'COMPLETE') {
-                message = "Assets pushed to tracker."
-
-            } else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
-                if ('result' in data) {
-                    message = 'Result: ' + data['result']
-                } else {
-                    // something unexpected happened
-                    message = 'Result: ' + data['state']
-                }
-            } else {
-                update_progress(status_task, status_url);
-                message = null
-            }
-
-            $('#track_assets_progress').html(message);
-        })
-
-      }
 }
 
 
@@ -184,19 +148,6 @@ function update_progress(status_task, status_url) {
 
 
 // -------------------- CN4M HELPERS --------------------
-/*
-function unselect_all() {
-    $('input:checkbox(:checked)').each(function() {
-        $(this).prop("checked", false);
-    })
-}
-
-function select_all() {
-    $('input:checkbox:not(:checked)').each(function() {
-        $(this).prop("checked", true);
-    })
-}
-*/
 
 function toggle_checkboxes(source) {
   checkboxes = document.getElementsByName('review_checkbox');

@@ -91,18 +91,49 @@ def check_assets(self):
 def track_assets(self):
     assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
     total = len(assets["untracked_repo_assets"]) + len(assets["untracked_quar_assets"])
-    #try:
-    sheet = connect_to_google_sheet()
-    setup_google_sheet(sheet)
-    i = update_google_sheet(sheet, "repository", assets["untracked_repo_assets"], total, 0, self)
-    update_google_sheet(sheet, "quarantine", assets["untracked_quar_assets"], total, i, self)
+    
+    # only bother tracking if there are untracked assets
+    if total > 0:
+        sheet = connect_to_google_sheet()
+        setup_google_sheet(sheet)
+        i = 0
+        repo_rows = []
+        repo_assets_to_move = []
+        for asset in assets["untracked_repo_assets"]:
+            i = i+1
+            repo_assets_to_move.append(asset)
+            asset = assets["untracked_repo_assets"][asset]
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': asset["name"]})
+            row = build_google_row(asset)
+            repo_rows.append(row)
+            time.sleep(sleep_time)
 
-    #except:
-    #    print("unable to update google sheet - check connection and configuration")
+        update_google_sheet(sheet, "repository", repo_rows)
+        # move assets from untracked to tracked
+        for asset in repo_assets_to_move:
+            assets["tracked_repo_assets"][asset] = assets["untracked_repo_assets"].pop(asset, None)
 
-    return {"current": total, "total": total, "status": "COMPLETE", "result": "untracked items tracked"}
+        quar_rows = []
+        quar_assets_to_move = []
+        for asset in assets["untracked_quar_assets"]:
+            i = i+1
+            quar_assets_to_move.append(asset)
+            asset = assets["untracked_quar_assets"][asset]
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': asset["name"]})
+            row = build_google_row(asset)
+            quar_rows.append(row)
+            time.sleep(sleep_time)
 
+        update_google_sheet(sheet, "quarantine", quar_rows)
+        # move assets from untracked to tracked
+        for asset in quar_assets_to_move:
+            assets["tracked_quar_assets"][asset] = assets["untracked_quar_assets"].pop(asset, None)
 
+        write_json_file(assets, "assets.json")
+        return {"current": total, "total": total, "status": "COMPLETE", "result": "untracked items tracked"}
+
+    else:
+        return {"current": 0, "total": 0, "status": "COMPLETE", "result": "no assets to track"}
 
 
 @shared_task

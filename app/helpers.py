@@ -2,6 +2,7 @@ from os.path import join, getsize
 from pathlib import Path
 from time import strftime, localtime
 from pymediainfo import MediaInfo
+from gspread_formatting import *
 import os
 import json
 import time
@@ -21,46 +22,33 @@ def connect_to_google_sheet():
     sheet = gc.open_by_key(google_sheet)
     return sheet
 
-def update_google_sheet(sheet, worksheet, assets, total, i, self):
+def build_google_row(asset):
+    row = []
+    row.append(asset["parent"])
+    row.append(asset["name"])
+    row.append(asset["duration"]) if "duration" in asset else row.append("")
+    row.append("")
+    row.append(asset["video_codec"]) if "video_codec" in asset else row.append("")
+    row.append(asset["width"]) if "width" in asset else row.append("")
+    row.append(asset["height"]) if "height" in asset else row.append("")
+    row.append(asset["framerate"]) if "framerate" in asset else row.append("")
+    row.append(asset["audio"]) if "audio" in asset else row.append("")
+    row.append(asset["audio_rate"]) if "audio_rate" in asset else row.append("")
+    row.append(asset["audio_bits"]) if "audio_bits" in asset else row.append("")
+    row.append(asset["audio_channels"]) if "audio_channels" in asset else row.append("")
+    row.append(asset["size"]) if "size" in asset else row.append("")
+    row.append(asset["created"]) if "created" in asset else row.append("")
+    row.append(asset["modified"]) if "modified" in asset else row.append("")
+    row.append(asset["processed"]) if "processed" in asset else row.append("")
+    row.append(asset["folder"]) if "folder" in asset else row.append("")
+    return row
+
+def update_google_sheet(sheet, worksheet, new_rows):
     selected_worksheet = sheet.worksheet(worksheet)
-    new_items = []
-    for asset in assets:
-        i = i+1
-        item = []
-        item.append(assets[asset]["parent"])
-        item.append(assets[asset]["name"])
-        self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': assets[asset]["name"]})
-        item.append(assets[asset]["duration"]) if "duration" in assets[asset] else item.append("")
-        item.append("")
-        item.append(assets[asset]["video_codec"]) if "video_codec" in assets[asset] else item.append("")
-        item.append(assets[asset]["width"]) if "width" in assets[asset] else item.append("")
-        item.append(assets[asset]["height"]) if "height" in assets[asset] else item.append("")
-        item.append(assets[asset]["framerate"]) if "framerate" in assets[asset] else item.append("")
-        item.append(assets[asset]["audio"]) if "audio" in assets[asset] else item.append("")
-        item.append(assets[asset]["audio_rate"]) if "audio_rate" in assets[asset] else item.append("")
-        item.append(assets[asset]["audio_bits"]) if "audio_bits" in assets[asset] else item.append("")
-        item.append(assets[asset]["audio_channels"]) if "audio_channels" in assets[asset] else item.append("")
-        item.append(assets[asset]["size"]) if "size" in assets[asset] else item.append("")
-        item.append(assets[asset]["created"]) if "created" in assets[asset] else item.append("")
-        item.append(assets[asset]["modified"]) if "modified" in assets[asset] else item.append("")
-        item.append(assets[asset]["processed"]) if "processed" in assets[asset] else item.append("")
-        item.append(assets[asset]["folder"]) if "folder" in assets[asset] else item.append("")
-        new_items.append(item)
-        time.sleep(sleep_time)
-
-    selected_worksheet.insert_rows(new_items, row=2, value_input_option='RAW', inherit_from_before=False)
-    return i
-
+    selected_worksheet.insert_rows(new_rows, row=2, value_input_option='RAW', inherit_from_before=False)
 
 def setup_google_sheet(sheet):
-    headers = [ "PARENT", "NAME", "DURATION", "NOTES", "CODEC", "WIDTH", "HEIGHT", "FRAMERATE", "AUDIO", "RATE", "BITS", "CHANNELS", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
-    header_formatting = {
-          "backgroundColor": { "red": 0.0, "green": 0.0, "blue": 0.0 },
-          "textFormat": {
-            "foregroundColor": { "red": 1.0, "green": 1.0, "blue": 1.0 },
-            "bold": True
-          }
-        }
+    headers = [ "PARENT", "NAME", "DURATION", "NOTES", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
 
     # get list of worksheets and check if ingest sheet is setup
     worksheet_objs = sheet.worksheets()
@@ -68,21 +56,28 @@ def setup_google_sheet(sheet):
     for worksheet in worksheet_objs:
         worksheets_list.append(worksheet.title)
     
-    if "repository" in worksheets_list:
-        repo_worksheet = sheet.worksheet("repository")
-    else:
-        # setup worksheet and headers
-        repo_worksheet = sheet.add_worksheet(title="repository", rows=100, cols=16)
-        repo_worksheet.update(range_name='1:1', values=[headers])
-        repo_worksheet.format('1:1', header_formatting)
-
-    if "quarantine" in worksheets_list:
-        quarantine_worksheet = sheet.worksheet("quarantine")
-    else:
-        # setup worksheet and headers
-        quarantine_worksheet = sheet.add_worksheet(title="quarantine", rows=100, cols=16)
-        quarantine_worksheet.update(range_name='1:1', values=[headers])
-        quarantine_worksheet.format('1:1', header_formatting)
+    needed_worksheets = ["repository","quarantine"]
+    for w in needed_worksheets:
+        if w in worksheets_list:
+            current_worksheet = sheet.worksheet(w)
+        else:
+            # setup worksheet and headers
+            # gspread formatting: https://github.com/robin900/gspread-formatting
+            current_worksheet = sheet.add_worksheet(title=w, rows=100, cols=16)
+            current_worksheet.update(range_name='1:1', values=[headers])
+            current_worksheet.format('1:1', {
+                "backgroundColor": { "red": 0.0, "green": 0.0, "blue": 0.0 },
+                "textFormat": {
+                    "foregroundColor": { "red": 1.0, "green": 1.0, "blue": 1.0 },
+                    "bold": True
+                    }
+                })
+            general_formatting = cellFormat(
+                horizontalAlignment='LEFT'
+                )
+            format_cell_range(current_worksheet, 'A:Q', general_formatting)
+            set_frozen(current_worksheet, rows=1)
+            set_column_widths(current_worksheet, [ ('A', 175), ('B', 400), ('C', 90), ('D', 175), ('E', 90), ('F', 65), ('G', 65), ('H', 55), ('I', 55), ('J', 55), ('K', 55), ('L', 55), ('M', 75), ('N', 135), ('O', 135), ('P', 135), ('Q', 265) ])
 
 def move_files(uid, src, dst):
     try:
@@ -222,7 +217,7 @@ def fast_hash(input_string, length=32):
     return h[:length]  # Trim hash if needed
 
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet"]
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row"]
 
 
 

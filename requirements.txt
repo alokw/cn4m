@@ -5,4 +5,5 @@ watchdog
 python-dotenv
 pymediainfo
 gspread
+gspread-formatting
 xxhash
