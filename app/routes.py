@@ -34,6 +34,12 @@ def run_track_assets():
     #return "done"
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
+@main.route('/clear_flags', methods=['POST'])
+def run_clear_flags():
+    task = clear_flags.delay()
+    #return "done"
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
 
 
 

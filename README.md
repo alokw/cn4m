@@ -12,6 +12,15 @@ cd /Users/outbox/Documents/GitHub/outbox_cn4m
 docker compose up (run in foreground)
 docker-compose up -d (run in background)
 
+
+to-do
+add conversion buttons and aerender buttons
+
+
+
+
+
+
 if running in background, manually check logs with
 docker-compose logs
 

@@ -1,6 +1,7 @@
-from os.path import join, getsize
+from os.path import join, getsize, isfile
 from pathlib import Path
 from time import strftime, localtime
+from datetime import datetime
 from pymediainfo import MediaInfo
 from gspread_formatting import *
 import os
@@ -8,14 +9,20 @@ import json
 import time
 import xxhash
 import gspread
+import errno
 
-cn4m_assets = "/cn4m_assets"
-repo_folder = "/cn4m_assets/repo"
+#cn4m_assets = "/cn4m_assets"
+#repo_folder = "/cn4m_assets/repo"
 #quar_folder = "/cn4m_assets/quarantine"
 
 google_creds = os.getenv("GOOGLE_CREDS")
 google_sheet = os.getenv("GOOGLE_SHEET")
 sleep_time = float(os.getenv("TIME_BETWEEN_CHECKS"))
+exclude_files = os.getenv("EXCLUDE_FILES").split(", ")
+
+cn4m_folder = "/cn4m_assets"
+cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
+cn4m_repo = os.path.join(cn4m_folder, "repo")
 
 def connect_to_google_sheet():
     gc = gspread.service_account_from_dict(json.loads(google_creds))
@@ -46,6 +53,14 @@ def build_google_row(asset):
 def update_google_sheet(sheet, worksheet, new_rows):
     selected_worksheet = sheet.worksheet(worksheet)
     selected_worksheet.insert_rows(new_rows, row=2, value_input_option='RAW', inherit_from_before=False)
+    if len(new_rows) >= 1:
+        row_range = '2:' + str(len(new_rows)+1)        
+        formatting = cellFormat(
+            backgroundColor=color(1, 1, 1),
+            textFormat=textFormat(bold=False, foregroundColor=color(0, 0, 0)),
+            horizontalAlignment='LEFT'
+            )
+        format_cell_range(selected_worksheet, row_range, formatting)
 
 def setup_google_sheet(sheet):
     headers = [ "PARENT", "NAME", "DURATION", "NOTES", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
@@ -94,7 +109,8 @@ def move_files(uid, src, dst):
 
 def get_files_from_folder(folder):
     files = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(folder)) for f in fn]
-    return files
+    sorted_files = sorted(files)
+    return sorted_files
 
 def get_folder(folder):
     if not os.path.exists(folder):
@@ -115,30 +131,37 @@ def get_json_file(file):
         json_data = {}
 
     # then check if the right keys exist, and if they don't, add them
+    if "tracked_flags" not in json_data:
+        json_data["tracked_flags"] = {}
     if "tracked_repo_assets" not in json_data:
         json_data["tracked_repo_assets"] = {}
     if "tracked_quar_assets" not in json_data:
         json_data["tracked_quar_assets"] = {}
+    if "untracked_flags" not in json_data:
+        json_data["untracked_flags"] = {}
     if "untracked_repo_assets" not in json_data:
         json_data["untracked_repo_assets"] = {}
     if "untracked_quar_assets" not in json_data:
         json_data["untracked_quar_assets"] = {}
     if "unreviewed_assets" not in json_data:
         json_data["unreviewed_assets"] = {}
-
+    if "unreviewed_flags" not in json_data:
+        json_data["unreviewed_flags"] = {}
     return json_data
 
 def check_asset(assets, file, filename):
     #parent = str(os.path.basename(os.path.dirname(file)))
     folder = str(os.path.normpath(os.path.dirname(file)))
-    parent = str(os.path.relpath(folder, repo_folder))
+    parent = str(os.path.relpath(folder, cn4m_repo))
     fileid = fast_hash(folder + "|" + filename)
     assets[fileid] = {}
     assets[fileid]["name"] = filename
     assets[fileid]["parent"] = parent
     assets[fileid]["folder"] = folder
+    assets[fileid]["dumbpath"] = str(parent + "." + filename).casefold()
     assets[fileid]["modified"] = strftime('%Y-%m-%d %H:%M:%S', localtime(os.path.getmtime(file)))
-    assets[fileid]["processed"] = strftime('%Y-%m-%d %H:%M:%S', localtime(int(time.time())))
+    assets[fileid]["processed"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    #assets[fileid]["processed"] = strftime('%Y-%m-%d %H:%M:%S', localtime(int(time.time())))
     # try to get creation and modification time (creation time only works in windows)
     try:
         assets[fileid]["created"] = strftime('%Y-%m-%d %H:%M:%S', localtime(os.path.getctime(file)))
@@ -163,7 +186,7 @@ def check_asset(assets, file, filename):
             elif video_codec_id == "ap4h":
                 video_codec = "ProRes 4444"
             elif video_codec_id == "apch":
-                video_codec = "ProRes 422 High Quality"
+                video_codec = "ProRes 422 HQ"
             elif video_codec_id == "apcn":
                 video_codec = "ProRes 422"
             elif video_codec_id == "apcs":
@@ -207,17 +230,34 @@ def check_asset(assets, file, filename):
     return assets
 
 def write_json_file(json_data, json_filename):
-    json_file = Path(os.path.join(cn4m_assets, json_filename))
+    json_file = Path(os.path.join(cn4m_folder, json_filename))
     with open(json_file, 'w') as f:
-        json.dump(json_data, f, indent=4, sort_keys=True)
+        #json.dump(json_data, f, indent=4, sort_keys=False)
+        json.dump(json_data, f, indent=4)
 
 def fast_hash(input_string, length=32):
     #h = xxhash.xxh64(input_string).hexdigest()  # 64-bit hash
     h = xxhash.xxh128(input_string).hexdigest()  # Use xxh128 for 32-char output
     return h[:length]  # Trim hash if needed
 
+# remove any files that should have been excluded but may have snuck in
+def purge_exclude_files(assets):
+    for f in exclude_files:
+        folder = str(cn4m_repo)
+        fileid = fast_hash(folder + "|" + f)
+        if fileid in assets:
+            del assets[fileid]
+            print(f"Key '{fileid}' removed successfully.")
+    return assets
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row"]
+
+def cn4m_note(assets, note):
+    print(note)
+    
+
+
+
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note"]
 
 
 

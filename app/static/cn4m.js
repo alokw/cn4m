@@ -49,6 +49,7 @@ function update_progress(status_task, status_url) {
     case "/check_assets":
       // send GET request to status URL
       $.getJSON(status_url, function(data) {
+        console.log(data)
         percent = parseInt(data['current'] * 100 / data['total']);
         if (data['state'] == 'PENDING') {
             message = "Starting Asset Check"
@@ -62,68 +63,148 @@ function update_progress(status_task, status_url) {
             update_progress(status_task, status_url);
         }   else if (data['status'] == 'COMPLETE') {
             message = "Asset Check Complete"
-            asset_table = `
-            <div class="table-responsive">
-            <table class="table table-dark table-striped table-hover table-sm fs-8 fw-lighter">
-            <thead>
-            <tr>
-            <th class="pr-4 py-1"><input type="checkbox" onClick="toggle_checkboxes(this)" /></th>
-            <th class="pr-4">Folder</th>
-            <th class="pr-4">Name</th>
-            <th class="pr-4">Duration</th>
-            <th class="pr-4">Codec</th>
-            <th class="pr-4">Width</th>
-            <th class="pr-4">Height</th>
-            <th class="pr-4">FPS</th>
-            <th class="pr-4">Audio</th>
-            <th class="pr-4">Rate</th>
-            <th class="pr-4">Bits</th>
-            <th class="pr-4">Ch</th>
-            <th class="pr-4">Size</th>
-            </tr>
-            </thead>
-            <tbody>`
-            
-            for (const [key, value] of Object.entries(data['result'])) {
-                obj = data['result'][key]
-                fileid = key
-                name = (('name' in obj) ? obj['name'] : "")
-                parent = (('parent' in obj) ? obj['parent'] : "").replace(/ /g, '&nbsp;')
-                duration = ('duration' in obj) ? obj['duration'] : ""
-                video_codec = ('video_codec' in obj) ? obj['video_codec'] : ""
-                width = ('width' in obj) ? obj['width'] : ""
-                height = ('height' in obj) ? obj['height'] : ""
-                framerate = ('framerate' in obj) ? obj['framerate'] : ""
-                audio = ('audio' in obj) ? obj['audio'] : ""
-                audio_rate = ('audio_rate' in obj) ? obj['audio_rate'] : ""
-                audio_bits = ('audio_bits' in obj) ? obj['audio_bits'] : ""
-                audio_channels = ('audio_channels' in obj) ? obj['audio_channels'] : ""
-                size = ('size' in obj) ? obj['size'] : ""
 
-                asset_table = asset_table + `
-                <tr id=#` + fileid + ` class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
-                <td class="pr-4 py-1"><input name="review_checkbox" type="checkbox" value="` + fileid + `"></td>
-                <td class="pr-4">` + parent + `</td>
-                <td class="pr-4">` + name + `</td>
-                <td class="pr-4">` + duration + `</td>
-                <td class="pr-4">` + video_codec + `</td>
-                <td class="pr-4">` + width + `</td>
-                <td class="pr-4">` + height + `</td>
-                <td class="pr-4">` + framerate + `</td>
-                <td class="pr-4">` + audio + `</td>
-                <td class="pr-4">` + audio_rate + `</td>
-                <td class="pr-4">` + audio_bits + `</td>
-                <td class="pr-4">` + audio_channels + `</td>
-                <td class="pr-4">` + size + `</td>
-                </tr>`
+
+
+
+
+            // Generate the table with clickable headers
+            let asset_table = `
+                <div class="table-responsive">
+                    <table id="sortableTable" class="table table-dark table-striped table-hover table-sm fs-8 fw-lighter">
+                        <thead>
+                            <tr>
+                                <th class="pr-4 py-1"><input type="checkbox" onClick="toggle_checkboxes(this)" /></th>
+                                <th class="pr-4" data-type="string">Folder</th>
+                                <th class="pr-4" data-type="string">Name</th>
+                                <th class="pr-4" data-type="number">Duration</th>
+                                <th class="pr-4" data-type="string">Codec</th>
+                                <th class="pr-4" data-type="number">Width</th>
+                                <th class="pr-4" data-type="number">Height</th>
+                                <th class="pr-4" data-type="number">FPS</th>
+                                <th class="pr-4" data-type="string">Audio</th>
+                                <th class="pr-4" data-type="number">Rate</th>
+                                <th class="pr-4" data-type="number">Bits</th>
+                                <th class="pr-4" data-type="number">Ch</th>
+                                <th class="pr-4" data-type="string">Size</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+            // Sort results ensuring "dumbpath" exists
+            const data_sorted = Object.fromEntries(
+                Object.entries(data['result']['assets']).sort((a, b) => 
+                    (a[1]?.dumbpath || "").localeCompare(b[1]?.dumbpath || "")
+                )
+            );
+            data['result']['assets'] = data_sorted;
+
+            // Populate table rows
+            for (const [key, value] of Object.entries(data['result']['assets'])) {
+                obj = data['result']['assets'][key];
+                fileid = key;
+                name = obj['name'] || "";
+                parent = (obj['parent'] || "").replace(/ /g, '&nbsp;');
+                duration = obj['duration'] || "";
+                video_codec = obj['video_codec'] || "";
+                width = obj['width'] || "";
+                height = obj['height'] || "";
+                framerate = obj['framerate'] || "";
+                audio = obj['audio'] || "";
+                audio_rate = obj['audio_rate'] || "";
+                audio_bits = obj['audio_bits'] || "";
+                audio_channels = obj['audio_channels'] || "";
+                size = obj['size'] || "";
+
+                asset_table += `
+                    <tr id=#` + fileid + ` class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
+                        <td class="pr-4 py-1"><input name="review_checkbox" type="checkbox" value="${fileid}"></td>
+                        <td class="pr-4">${parent}</td>
+                        <td class="pr-4">${name}</td>
+                        <td class="pr-4">${duration}</td>
+                        <td class="pr-4">${video_codec}</td>
+                        <td class="pr-4">${width}</td>
+                        <td class="pr-4">${height}</td>
+                        <td class="pr-4">${framerate}</td>
+                        <td class="pr-4">${audio}</td>
+                        <td class="pr-4">${audio_rate}</td>
+                        <td class="pr-4">${audio_bits}</td>
+                        <td class="pr-4">${audio_channels}</td>
+                        <td class="pr-4">${size}</td>
+                    </tr>`;
             }
 
-            asset_table = asset_table + `
-            </tbody>
-            </table>
-            </div>`
+            asset_table += `
+                </tbody>
+                </table>
+            </div>`;
 
+            // Insert the table into the DOM first
             $('#results').html(asset_table);
+
+            // **Now Attach Click Event Listeners After Table is in the DOM**
+            function makeTableSortable() {
+                const table = document.getElementById("sortableTable");
+                if (!table) return;
+
+                const headers = table.querySelectorAll("thead th");
+                const tbody = table.querySelector("tbody");
+                
+                let sortOrder = {}; // Track column sort order
+
+                headers.forEach((header, colIndex) => {
+                    if (colIndex === 0) return; // Skip checkbox header
+
+                    header.style.cursor = "pointer"; // Indicate clickable headers
+
+                    header.addEventListener("click", () => {
+                        const dataType = header.getAttribute("data-type") || "string";
+
+                        // Convert table rows to an array
+                        let rowsArray = Array.from(tbody.querySelectorAll("tr"));
+
+                        // Sort based on column content
+                        rowsArray.sort((rowA, rowB) => {
+                            let cellA = rowA.children[colIndex]?.innerText.trim() || "";
+                            let cellB = rowB.children[colIndex]?.innerText.trim() || "";
+
+                            let comparison = 0;
+                            if (dataType === "number") {
+                                comparison = (parseFloat(cellA) || 0) - (parseFloat(cellB) || 0);
+                            } else {
+                                comparison = cellA.localeCompare(cellB);
+                            }
+
+                            return sortOrder[colIndex] === "asc" ? comparison : -comparison;
+                        });
+
+                        // Toggle sort order for next click
+                        sortOrder[colIndex] = sortOrder[colIndex] === "asc" ? "desc" : "asc";
+
+                        // Re-insert sorted rows
+                        tbody.innerHTML = "";
+                        rowsArray.forEach(row => tbody.appendChild(row));
+                    });
+                });
+            }
+
+            // **Run the function after the table has been inserted**
+            makeTableSortable();
+
+
+            flags = ""
+            for (const [key, value] of Object.entries(data['result']['flags'])) {
+              obj = data['result']['flags'][key];
+              flags += '<span class="severity-' + obj['severity'] + '">'
+              flags += obj['note']
+              flags += ": <b>"
+              flags += obj['name']
+              flags += "</b></span><br>"
+            }
+            
+            $('#review_asset_flags').html(flags);
+            ajax_post_simple('/clear_flags')
+
 
         }   else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
             if ('result' in data) {
@@ -137,14 +218,13 @@ function update_progress(status_task, status_url) {
           update_progress(status_task, status_url);
           message = null
         }
+
+
         $('#check_asset_progress').html(message);
+
       });
   }
-
 }
-
-
-
 
 
 // -------------------- CN4M HELPERS --------------------

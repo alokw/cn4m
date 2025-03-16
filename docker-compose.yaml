@@ -9,6 +9,8 @@ services:
       - worker
     volumes:
       - .:/app  # Sync local files with container (useful for development)
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       - FLASK_APP=run.py
       - FLASK_ENV=development
@@ -25,6 +27,9 @@ services:
     container_name: redis_server
     ports:
       - "6379:6379"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
 
   worker:
     build: .
@@ -34,6 +39,8 @@ services:
     volumes:
       - .:/app
       - /Users/outbox/Desktop/cn4m_assets:/cn4m_assets
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
@@ -52,3 +59,6 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
     ports:
       - "5555:5555"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro

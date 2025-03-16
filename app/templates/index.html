@@ -42,6 +42,7 @@
         <button id="unselect-all" class="obx-button">UN-SELECT ALL</button>-->
         <button id="quarantine-assets" class="obx-button">QUARANTINE SELECTED</button>
         <button id="approve-assets" class="obx-button">APPROVE SELECTED</button><br />
+        <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_flags"></span></div>
         <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_progress"></span></div>
     </div>
 
@@ -59,6 +60,7 @@ $(function() { $('#check-assets').click(check_assets); });
 $(function() { $('#approve-assets').click(approve_assets); });
 $(function() { $('#quarantine-assets').click(quarantine_assets); });
 $(function() { $('#track-assets').click(track_assets); });
+//$(function() { $('#clear-flags').click(clear_flags); });
 
 </script>
 </body>
