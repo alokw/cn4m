@@ -5,6 +5,7 @@ from datetime import datetime
 from pymediainfo import MediaInfo
 from gspread_formatting import *
 import os
+import sys
 import json
 import time
 import xxhash
@@ -31,6 +32,7 @@ def connect_to_google_sheet():
 
 def build_google_row(asset):
     row = []
+    row.append("received")
     row.append(asset["parent"])
     row.append(asset["name"])
     row.append(asset["duration"]) if "duration" in asset else row.append("")
@@ -63,7 +65,7 @@ def update_google_sheet(sheet, worksheet, new_rows):
         format_cell_range(selected_worksheet, row_range, formatting)
 
 def setup_google_sheet(sheet):
-    headers = [ "PARENT", "NAME", "DURATION", "NOTES", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
+    headers = [ "STATUS", "PARENT", "NAME", "DURATION", "NOTES", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
 
     # get list of worksheets and check if ingest sheet is setup
     worksheet_objs = sheet.worksheets()
@@ -90,9 +92,15 @@ def setup_google_sheet(sheet):
             general_formatting = cellFormat(
                 horizontalAlignment='LEFT'
                 )
+            validation_rule = DataValidationRule(
+                BooleanCondition('ONE_OF_LIST', ['received', 'ingested', 'programmed', 'waiting', 'problem']),
+                showCustomUi=True
+            )
+
             format_cell_range(current_worksheet, 'A:Q', general_formatting)
             set_frozen(current_worksheet, rows=1)
-            set_column_widths(current_worksheet, [ ('A', 175), ('B', 400), ('C', 90), ('D', 175), ('E', 90), ('F', 65), ('G', 65), ('H', 55), ('I', 55), ('J', 55), ('K', 55), ('L', 55), ('M', 75), ('N', 135), ('O', 135), ('P', 135), ('Q', 265) ])
+            set_column_widths(current_worksheet, [ ('A', 100), ('B', 175), ('C', 400), ('D', 90), ('E', 175), ('F', 90), ('G', 65), ('H', 65), ('I', 55), ('J', 55), ('K', 55), ('L', 55), ('M', 55), ('N', 75), ('O', 135), ('P', 135), ('Q', 135), ('R', 265) ])
+            set_data_validation_for_cell_range(current_worksheet, 'A2:A2000', validation_rule)
 
 def move_files(uid, src, dst):
     try:
@@ -106,6 +114,11 @@ def move_files(uid, src, dst):
             os.unlink(src)
         else:
             raise
+    except PermissionError:
+        print(f"Permission error: {file_path}")    
+#        assets["unreviewed_flags"][asset] = assets["unreviewed_assets"].pop(asset, None)
+#        assets["unreviewed_flags"][asset]["note"] = "marked for quarantine but no longer found"
+#        assets["unreviewed_flags"][asset]["severity"] = "warn"
 
 def get_files_from_folder(folder):
     files = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(folder)) for f in fn]
@@ -250,6 +263,28 @@ def purge_exclude_files(assets):
             print(f"Key '{fileid}' removed successfully.")
     return assets
 
+'''
+def unlock_file(file_path):
+    # Unlocks a file on macOS using chflags.
+    # added due to finding locked files copied from google drive
+    print("---- trying to unlock file -----")
+    print(file_path)
+    print(sys.platform)
+    #if sys.platform == 'darwin':
+    if sys.platform == 'linux':
+        try:
+            print("system darin")
+            print("chflags in progress")
+            os.system(f'whoami')
+            os.system(f'id -g -n')
+            os.system(f'chmod 777 "{file_path}"')
+            os.system(f'ls -l /cn4m_assets/repo/1001_sat_am_sizzle')
+            #os.system(f'chflags nouchg {file_path}')
+        except PermissionError:
+            print(f"Permission error: {file_path}")
+        except FileNotFoundError:
+            print(f"File not found: {file_path}")
+'''
 
 def cn4m_note(assets, note):
     print(note)

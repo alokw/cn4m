@@ -15,8 +15,8 @@ docker-compose up -d (run in background)
 
 to-do
 add conversion buttons and aerender buttons
-
-
+update push to google to include flagged assets
+add nickname for hvc1 codec
 
 
 
