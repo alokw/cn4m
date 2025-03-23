@@ -20,6 +20,20 @@ print("quarantine folder = " + str(cn4m_quarantine))
 print("repo folder = " + str(cn4m_repo))
 
 @celery.task(bind=True)
+def extract_audio(self, asset):
+    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    folder = assets["unreviewed_assets"][asset]["folder"]
+    filename = assets["unreviewed_assets"][asset]["name"]
+    src = os.path.join(folder, filename)
+    # print("extracting audio for" + str(asset))
+    probe = ffmpeg_extract_audio(src)
+    print("return from helper:")
+    print(json.dumps(probe, indent = 4))
+    self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_approve), 'status': asset})
+    return {"current": 1, "total": 1, "status": "COMPLETE", "result": asset}
+
+
+@celery.task(bind=True)
 def approve_assets(self, assets):
     assets_to_approve = json.loads(assets)
     assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
@@ -248,7 +262,7 @@ def long_task(self):
 
 
 # Explicitly define what gets imported when using `from app.tasks import *`
-__all__ = ["check_assets", "add_numbers", "long_task", "approve_assets", "quarantine_assets", "track_assets", "clear_flags"]
+__all__ = ["check_assets", "add_numbers", "long_task", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "extract_audio"]
 
 
 

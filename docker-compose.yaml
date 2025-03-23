@@ -38,9 +38,10 @@ services:
       - redis
     volumes:
       - .:/app
-      - /Users/outbox/Desktop/cn4m_assets:/cn4m_assets
+      - M:\usta25:/cn4m_assets
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
+    #  - /Users/outbox/Desktop/cn4m_assets:/cn4m_assets
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0

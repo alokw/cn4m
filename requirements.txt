@@ -7,3 +7,4 @@ pymediainfo
 gspread
 gspread-formatting
 xxhash
+ffmpeg-python

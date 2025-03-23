@@ -8,7 +8,11 @@ if they are quarantined, they are moved to untracked_quar_assets
 when they are tracked (sent to google) they are moved to tracked...assets
 
 
+make sure docker engine is running
+
+cd M:\GitHub\outbox_cn4m
 cd /Users/outbox/Documents/GitHub/outbox_cn4m
+
 docker compose up (run in foreground)
 docker-compose up -d (run in background)
 

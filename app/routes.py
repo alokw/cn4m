@@ -10,6 +10,11 @@ main = Blueprint("main", __name__)
 def index():
     return render_template('index.html')
 
+@main.route('/extract_audio/<id>', methods=['POST'])  # /landingpage/A
+def run_extract_audio(id):
+    task = extract_audio.delay(id)
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
 @main.route('/check_assets', methods=['POST'])
 def run_check_assets():
     task = check_assets.delay()

@@ -19,6 +19,10 @@ function track_assets() {
 }
 
 
+function extractAudio(id){
+  ajax_post_simple('/extract_audio/' + fileid)
+}
+
 function update_progress(status_task, status_url) {
 
   switch(status_task) {
@@ -87,6 +91,7 @@ function update_progress(status_task, status_url) {
                                 <th class="pr-4" data-type="number">Bits</th>
                                 <th class="pr-4" data-type="number">Ch</th>
                                 <th class="pr-4" data-type="string">Size</th>
+                                <th class="pr-4" data-type="string">Actions</th>
                             </tr>
                         </thead>
                         <tbody>`;
@@ -118,7 +123,7 @@ function update_progress(status_task, status_url) {
 
                 asset_table += `
                     <tr id=#` + fileid + ` class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
-                        <td class="pr-4 py-1"><input name="review_checkbox" type="checkbox" value="${fileid}"></td>
+                        <td class="pr-4 py-1"><input class="obx-checkbox" name="review_checkbox" type="checkbox" value="${fileid}"></td>
                         <td class="pr-4">${parent}</td>
                         <td class="pr-4">${name}</td>
                         <td class="pr-4">${duration}</td>
@@ -131,6 +136,7 @@ function update_progress(status_task, status_url) {
                         <td class="pr-4">${audio_bits}</td>
                         <td class="pr-4">${audio_channels}</td>
                         <td class="pr-4">${size}</td>
+                        <td class="pr-4"><button class="obx-actionbutton" title="Extract Audio to WAV" value="${fileid}" onclick="extractAudio(this.value)">&#9836</button></td>
                     </tr>`;
             }
 
@@ -141,6 +147,7 @@ function update_progress(status_task, status_url) {
 
             // Insert the table into the DOM first
             $('#results').html(asset_table);
+
 
             // **Now Attach Click Event Listeners After Table is in the DOM**
             function makeTableSortable() {

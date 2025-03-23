@@ -11,6 +11,9 @@ import time
 import xxhash
 import gspread
 import errno
+import ffmpeg
+import argparse
+
 
 #cn4m_assets = "/cn4m_assets"
 #repo_folder = "/cn4m_assets/repo"
@@ -24,6 +27,21 @@ exclude_files = os.getenv("EXCLUDE_FILES").split(", ")
 cn4m_folder = "/cn4m_assets"
 cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
 cn4m_repo = os.path.join(cn4m_folder, "repo")
+
+def ffmpeg_extract_audio(in_filename):
+    out_filename = str(Path(in_filename).with_suffix(".wav"))
+    print(out_filename)
+    probe = (
+        ffmpeg
+        .input(in_filename, vn=None)
+        .output(out_filename)
+        .global_args('-acodec pcm_s16le')
+        .global_args('-ar 48000')
+        .global_args('-ac 2')
+        .run()
+        )
+    #probe = ffmpeg.probe(in_filename)
+    return probe
 
 def connect_to_google_sheet():
     gc = gspread.service_account_from_dict(json.loads(google_creds))
@@ -292,7 +310,7 @@ def cn4m_note(assets, note):
 
 
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note"]
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note", "ffmpeg_extract_audio"]
 
 
 
