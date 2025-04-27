@@ -1,20 +1,30 @@
-# outbox_cn4m
+# cn4m
+
+### about
+cn4m was developed by creative outbox to help establish a consistent content management and tracking ecosystem
  
-add assets to the repo
-run a check
-assets discovered for the first time are added to unreviewed_assets
-if they are approved, they are moved to untracked_repo_assets
-if they are quarantined, they are moved to untracked_quar_assets
-when they are tracked (sent to google) they are moved to tracked...assets
+### general workflow
+ 1. add assets to the repo
+ 2. run a check
+ 3. assets discovered for the first time are added to unreviewed_assets
+ 4. if they are approved, they are moved to untracked_repo_assets
+ 5. if they are quarantined, they are moved to untracked_quar_assets
+ 6. when they are tracked (sent to google) they are moved to tracked...assets
 
+### how to install cn4m server
+ 1. install git or github desktop
+ 2. clone the cn4m repository
+    > in github desktop -> file -> clone repository -> https://github.com/alokw/outbox_cn4m.git
+ 3. modify the .env file with your preferences and info
 
-make sure docker engine is running
-
-cd M:\GitHub\outbox_cn4m
-cd /Users/outbox/Documents/GitHub/outbox_cn4m
-
-docker compose up (run in foreground)
-docker-compose up -d (run in background)
+### how to run cn4m server
+ 1. make sure docker engine is running
+ 2. in powershell (windows) or terminal (mac), navigate to the cn4m directory
+    > (windows) cd D:\github\outbox_cn4m
+    > (mac) cd /Users/outbox/Documents/GitHub/outbox_cn4m
+ 3. run docker compose
+    > (in foreground) docker compose up
+    > (in background) docker compose up -d
 
 
 to-do
@@ -82,3 +92,9 @@ docker-compose up --scale worker=3 -d
 
 
 
+## Troubleshooting:
+
+ - If you get a "*connect ENOENT \.\pipe\errorReporter*" error from docker
+   at startup, add yourself to the docker users group by running the
+   following in PowerShell (as administrator):
+	> net localgroup docker-users <<your windows username>> /add

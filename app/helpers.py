@@ -1,3 +1,5 @@
+# restart celery_worker to check changes from this file
+
 from os.path import join, getsize, isfile
 from pathlib import Path
 from time import strftime, localtime
@@ -13,6 +15,7 @@ import gspread
 import errno
 import ffmpeg
 import argparse
+import subprocess
 
 
 #cn4m_assets = "/cn4m_assets"
@@ -29,7 +32,50 @@ cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
 cn4m_repo = os.path.join(cn4m_folder, "repo")
 
 def ffmpeg_extract_audio(in_filename):
-    out_filename = str(Path(in_filename).with_suffix(".wav"))
+    # subprocess.run(["ffmpeg", "-formats"])      
+    #print("in_filename:", in_filename)
+
+    #out_filename = str(Path(in_filename).with_suffix(".wav"))
+    p = Path(in_filename)
+    out_filename = str(p.parent / (p.stem + "_hapaudio.mov"))
+    #print("out_filename:", out_filename)
+
+    #.output(out_filename, **{'acodec': 'pcm_s16le', 'ar': 48000, 'ac': 2})
+
+    # color=c=black:s=16x16 -i %%A -map 0:v -map 1:a -c:v hap -format hap -vf "fps=30" -c:a pcm_s16le -ar 48000 -tune stillimage -shortest "%%~dA%%~pA%%~nA_hapaudio.mov"
+
+    #   start cmd /k ffmpeg.exe -f lavfi -i color=c=black:s=16x16 -i %%A -map 0:v -map 1:a -c:v hap -format hap -vf "fps=30" -c:a pcm_s16le -ar 48000 -tune stillimage -shortest "%%~dA%%~pA%%~nA_hapaudio.mov"
+
+
+    try:
+        status = (
+            ffmpeg
+            .input('color=c=black:s=16x16', f='lavfi')   # color first! input 0 (video)
+            .input(in_filename)                          # real file second! input 1 (audio)
+            .output(
+                out_filename,
+                vcodec='hap',
+                acodec='pcm_s16le',
+                format='mov',
+                vf='fps=30',
+                ar=48000,
+                tune='stillimage',
+                shortest=None
+            )
+            .global_args(
+                '-map', '0:v',    # take video from color
+                '-map', '1:a'     # take audio from real file
+            )
+            .run(overwrite_output=True, capture_stdout=True, capture_stderr=True)
+        )
+        print(stderr)
+    except:
+        status = ("error processing:", in_filename)
+
+    # print(status)
+    #return status
+    
+    '''
     print(out_filename)
     probe = (
         ffmpeg
@@ -42,6 +88,9 @@ def ffmpeg_extract_audio(in_filename):
         )
     #probe = ffmpeg.probe(in_filename)
     return probe
+    '''
+    return in_filename
+
 
 def connect_to_google_sheet():
     gc = gspread.service_account_from_dict(json.loads(google_creds))

@@ -3,7 +3,7 @@ from celery import Celery
 from dotenv import load_dotenv
 import os
 
-load_dotenv("settings.env")
+load_dotenv(".env")
 
 def make_celery(app):
     """Initialize Celery with Flask context."""

@@ -1,6 +1,9 @@
 # Use an official Python runtime as a parent image
 FROM python:3.9-slim
 
+#WORKDIR /ffmpeg
+#RUN make && make install
+
 # Set the working directory in the container
 WORKDIR /app
 
@@ -9,7 +12,13 @@ COPY requirements.txt .
 
 # Install any needed packages specified in requirements.txt
 RUN pip install --trusted-host pypi.python.org -r requirements.txt
-RUN apt-get -y update && apt-get -y upgrade && apt-get install -y --no-install-recommends ffmpeg
+#RUN apt-get -y update && apt-get -y upgrade && apt-get install -y --no-install-recommends ffmpeg
+
+# Pre-cache package list separately
+RUN apt-get update
+
+# Install ffmpeg
+RUN apt-get install -y --no-install-recommends ffmpeg
 
 # Copy the rest of the application files
 COPY . .

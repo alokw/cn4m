@@ -21,16 +21,16 @@ print("repo folder = " + str(cn4m_repo))
 
 @celery.task(bind=True)
 def extract_audio(self, asset):
+    print(asset)
     assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
     folder = assets["unreviewed_assets"][asset]["folder"]
     filename = assets["unreviewed_assets"][asset]["name"]
     src = os.path.join(folder, filename)
-    # print("extracting audio for" + str(asset))
-    probe = ffmpeg_extract_audio(src)
-    print("return from helper:")
-    print(json.dumps(probe, indent = 4))
-    self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_approve), 'status': asset})
-    return {"current": 1, "total": 1, "status": "COMPLETE", "result": asset}
+    extract_audio = ffmpeg_extract_audio(src)
+    #print(json.dumps(extract_audio, indent = 4))
+    self.update_state(state='PROGRESS', meta={'current': 1, 'total': 1, 'status': extract_audio})
+    check_assets.delay()
+    return {"current": 1, "total": 1, "status": "COMPLETE", "result": extract_audio}
 
 
 @celery.task(bind=True)
@@ -99,9 +99,11 @@ def check_assets(self):
     tracked_quar_assets = assets["tracked_quar_assets"]
     untracked_repo_assets = assets["untracked_repo_assets"]
     untracked_quar_assets = assets["untracked_quar_assets"]
-    unreviewed_assets = assets["unreviewed_assets"]
+    #unreviewed_assets = assets["unreviewed_assets"]
+    unreviewed_assets = {}
     # get all repo and reviewed assets so we dont recheck them (but okay to recheck quarantined ones)
-    current_fileids = all_keys = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys(), unreviewed_assets.keys())
+    # current_fileids = all_keys = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys(), unreviewed_assets.keys())
+    current_fileids = all_keys = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys())
 
     #print("repo_files" + str(repo_files))
 

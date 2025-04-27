@@ -18,8 +18,8 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
     #  - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    env_file:
-      - settings.env
+    #env_file:
+    #  - settings.env
     # command: ["flask", "run", "--host=0.0.0.0", "--port=5000", "--reload"]
 
   redis:
@@ -38,16 +38,20 @@ services:
       - redis
     volumes:
       - .:/app
-      - M:\usta25:/cn4m_assets
+    #  - D:\github\FFmpeg:/ffmpeg
+      - ${ASSET_FOLDER}:/cn4m_assets
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     #  - /Users/outbox/Desktop/cn4m_assets:/cn4m_assets
     environment:
+      - ASSET_FOLDER=${ASSET_FOLDER}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
     #  - CELERY_RESULT_BACKEND=redis://redis:6379/0
     #command: ["celery", "-A", "app:celery", "worker", "--loglevel=info"]
     command: ["/bin/sh", "-c", "watchmedo auto-restart --recursive --pattern=*.py -- celery -A app:celery worker --loglevel=info --uid=nobody"]
+    #env_file:
+    #  - settings.env
 
 
   flower:  # Celery monitoring UI

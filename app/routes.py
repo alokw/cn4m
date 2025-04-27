@@ -13,6 +13,7 @@ def index():
 @main.route('/extract_audio/<id>', methods=['POST'])  # /landingpage/A
 def run_extract_audio(id):
     task = extract_audio.delay(id)
+    print(id)
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
 @main.route('/check_assets', methods=['POST'])

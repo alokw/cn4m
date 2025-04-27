@@ -20,13 +20,26 @@ function track_assets() {
 
 
 function extractAudio(id){
-  ajax_post_simple('/extract_audio/' + fileid)
+  ajax_post_simple('/extract_audio/' + id)
 }
 
 function update_progress(status_task, status_url) {
+  console.log(status_task)
 
-  switch(status_task) {
-    case "/approve_assets":
+  const parts = status_task.replace(/^\/+/, '').split('/');
+  const basePath = parts[0];
+
+  switch(basePath) {
+    case "extract_audio":
+      msg_destination = "#review_asset_progress"
+      msg_pending = "Attempting to Extract Audio"
+      msg_progress = "Attempting to Extract Audio in Progress"
+      msg_complete = "Attempt to Extract Audio Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      //ajax_post_simple('/check_assets')
+      break;
+
+    case "approve_assets":
       msg_destination = "#review_asset_progress"
       msg_pending = "Starting Approval"
       msg_progress = "Approving Assets"
@@ -34,7 +47,7 @@ function update_progress(status_task, status_url) {
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
       break;
 
-    case "/quarantine_assets":
+    case "quarantine_assets":
       msg_destination = "#review_asset_progress"
       msg_pending = "Starting Quarantine"
       msg_progress = "Quarantining Assets"
@@ -42,7 +55,7 @@ function update_progress(status_task, status_url) {
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
       break;
 
-    case "/track_assets":
+    case "track_assets":
       msg_destination = "#track_assets_progress"
       msg_pending = "Connecting to Google Sheet"
       msg_progress = "Tracking Assets"
@@ -50,7 +63,7 @@ function update_progress(status_task, status_url) {
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
       break;
 
-    case "/check_assets":
+    case "check_assets":
       // send GET request to status URL
       $.getJSON(status_url, function(data) {
         console.log(data)
