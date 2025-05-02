@@ -39,12 +39,14 @@ services:
     volumes:
       - .:/app
     #  - D:\github\FFmpeg:/ffmpeg
-      - ${ASSET_FOLDER}:/cn4m_assets
+      - ${REPO_FOLDER}:/cn4m_assets/repo
+      - ${QUAR_FOLDER}:/cn4m_assets/quarantine
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     #  - /Users/outbox/Desktop/cn4m_assets:/cn4m_assets
     environment:
-      - ASSET_FOLDER=${ASSET_FOLDER}
+      - REPO_FOLDER=${REPO_FOLDER}
+      - QUAR_FOLDER=${QUAR_FOLDER}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
     #  - CELERY_RESULT_BACKEND=redis://redis:6379/0

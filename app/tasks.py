@@ -22,7 +22,7 @@ print("repo folder = " + str(cn4m_repo))
 @celery.task(bind=True)
 def extract_audio(self, asset):
     print(asset)
-    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
     folder = assets["unreviewed_assets"][asset]["folder"]
     filename = assets["unreviewed_assets"][asset]["name"]
     src = os.path.join(folder, filename)
@@ -36,7 +36,7 @@ def extract_audio(self, asset):
 @celery.task(bind=True)
 def approve_assets(self, assets):
     assets_to_approve = json.loads(assets)
-    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
     # src = os.path.join(folder, filename)
     # assets = get_json_file("/cn4m_assets/assets.json")                  # load file or create object if doesnt exist
     i = 0
@@ -54,7 +54,7 @@ def approve_assets(self, assets):
 @celery.task(bind=True)
 def quarantine_assets(self, assets):
     assets_to_quarantine = json.loads(assets)
-    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
     # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
     i = 0
     # move approved assets from unreviewed to untracked
@@ -92,8 +92,9 @@ def check_assets(self):
     quar_folder = get_folder(cn4m_quarantine)     # create folder if doesnt exist
     # repo_folder = get_folder("/cn4m_assets/repo")           # create folder if doesnt exist
     # quar_folder = get_folder("/cn4m_assets/quarantine")     # create folder if doesnt exist
-    repo_files = get_files_from_folder(repo_folder)         # get files from repo
-    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    repo_files = get_files_from_folder(cn4m_repo)         # get files from repo
+    #assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
     # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
     tracked_repo_assets = assets["tracked_repo_assets"]
     tracked_quar_assets = assets["tracked_quar_assets"]
@@ -166,7 +167,7 @@ def check_assets(self):
 @celery.task(bind=True)
 def track_assets(self):
     # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
-    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
     total = len(assets["untracked_repo_assets"]) + len(assets["untracked_quar_assets"])
     
     # only bother tracking if there are untracked assets
@@ -217,7 +218,7 @@ def track_assets(self):
 @celery.task(bind=True)
 def clear_flags(self):
     # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
-    assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
     total = len(assets["unreviewed_flags"])
     i = 0
     # only bother tracking if there are untracked assets

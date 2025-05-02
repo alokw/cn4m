@@ -310,7 +310,9 @@ def check_asset(assets, file, filename):
     return assets
 
 def write_json_file(json_data, json_filename):
-    json_file = Path(os.path.join(cn4m_folder, json_filename))
+    #json_file = Path(os.path.join(cn4m_folder, json_filename))
+    cn4m_repo = os.path.join(cn4m_folder, "repo")
+    json_file = Path(os.path.join(cn4m_repo, json_filename))
     with open(json_file, 'w') as f:
         #json.dump(json_data, f, indent=4, sort_keys=False)
         json.dump(json_data, f, indent=4)
