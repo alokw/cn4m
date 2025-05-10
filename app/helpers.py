@@ -16,6 +16,7 @@ import errno
 import ffmpeg
 import argparse
 import subprocess
+import shutil
 
 
 #cn4m_assets = "/cn4m_assets"
