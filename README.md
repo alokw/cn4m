@@ -31,8 +31,7 @@ to-do
 add conversion buttons and aerender buttons
 update push to google to include flagged assets
 add nickname for hvc1 codec
-
-
+Add a way to select all assets in a specific parent folder
 
 
 if running in background, manually check logs with
