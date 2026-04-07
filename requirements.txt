@@ -8,3 +8,5 @@ gspread
 gspread-formatting
 xxhash
 ffmpeg-python
+requests
+discord.py

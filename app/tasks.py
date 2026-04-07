@@ -1,17 +1,25 @@
-from celery import shared_task
+# tasks.py
+# Celery background tasks. Each task is triggered by a route in routes.py
+# and runs asynchronously so the browser doesn't time out on long operations.
+# Progress is reported via self.update_state() and polled by the frontend JS.
+
 from app import celery
 from app.helpers import *
+from app.discord_bot import notify_approved, notify_quarantined, notify_tracked
 import os
 import time
 import json
 
+# ── Config ────────────────────────────────────────────────────────────────────
 exclude_files = os.getenv("EXCLUDE_FILES").split(", ")
-# print("exclude:" + str(exclude_files))
-sleep_time = float(os.getenv("TIME_BETWEEN_CHECKS"))
+sleep_time = float(os.getenv("TIME_BETWEEN_CHECKS"))  # small delay between file ops for responsive progress updates
+
+# Docker container paths (host folders are mounted here via docker-compose)
 cn4m_folder = "/cn4m_assets"
 cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
 cn4m_repo = os.path.join(cn4m_folder, "repo")
 
+# Print config at worker startup so it's easy to confirm settings in logs
 print("settings.env google_sheet = " + str(os.getenv("GOOGLE_SHEET")))
 print("settings.env exclude_files = " + str(exclude_files))
 print("settings.env sleep_time = " + str(os.getenv("TIME_BETWEEN_CHECKS")))
@@ -19,28 +27,38 @@ print("docker project_folder = " + str(cn4m_folder))
 print("quarantine folder = " + str(cn4m_quarantine))
 print("repo folder = " + str(cn4m_repo))
 
+
+# ── Audio extraction ──────────────────────────────────────────────────────────
+
 @celery.task(bind=True)
 def extract_audio(self, asset):
+    """
+    Wraps a media file's audio track in a tiny HAP-encoded .mov for disguise/d3 playback.
+    After completion, re-runs check_assets so the new file appears in the UI.
+    """
     print(asset)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
     folder = assets["unreviewed_assets"][asset]["folder"]
     filename = assets["unreviewed_assets"][asset]["name"]
     src = os.path.join(folder, filename)
-    extract_audio = ffmpeg_extract_audio(src)
-    #print(json.dumps(extract_audio, indent = 4))
-    self.update_state(state='PROGRESS', meta={'current': 1, 'total': 1, 'status': extract_audio})
-    check_assets.delay()
-    return {"current": 1, "total": 1, "status": "COMPLETE", "result": extract_audio}
+    result = ffmpeg_extract_audio(src)
+    self.update_state(state='PROGRESS', meta={'current': 1, 'total': 1, 'status': result})
+    check_assets.delay()  # re-scan so the new _hapaudio.mov shows up
+    return {"current": 1, "total": 1, "status": "COMPLETE", "result": result}
 
+
+# ── Approve assets ────────────────────────────────────────────────────────────
 
 @celery.task(bind=True)
 def approve_assets(self, assets):
+    """
+    Move selected assets from unreviewed_assets → untracked_repo_assets.
+    'Approved' means the files look good and are ready to be pushed to Google Sheets.
+    The files themselves stay in place — only the JSON state changes.
+    """
     assets_to_approve = json.loads(assets)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
-    # src = os.path.join(folder, filename)
-    # assets = get_json_file("/cn4m_assets/assets.json")                  # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
     i = 0
-    # move approved assets from unreviewed to untracked
     for asset in assets_to_approve:
         i = i+1
         assets["untracked_repo_assets"][asset] = assets["unreviewed_assets"].pop(asset, None)
@@ -48,16 +66,26 @@ def approve_assets(self, assets):
         time.sleep(sleep_time)
 
     write_json_file(assets, "assets.json")
+
+    # Notify Discord with the list of approved files
+    approved_data = {fid: assets["untracked_repo_assets"][fid] for fid in assets_to_approve if fid in assets["untracked_repo_assets"]}
+    notify_approved(approved_data)
+
     return {"current": len(assets_to_approve), "total": len(assets_to_approve), "status": "COMPLETE", "result": assets_to_approve}
 
 
+# ── Quarantine assets ─────────────────────────────────────────────────────────
+
 @celery.task(bind=True)
 def quarantine_assets(self, assets):
+    """
+    Physically move selected files from the repo folder to the quarantine folder,
+    then update the JSON state: unreviewed_assets → untracked_quar_assets.
+    If a file has disappeared since the last check, flag it instead of crashing.
+    """
     assets_to_quarantine = json.loads(assets)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
-    # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
     i = 0
-    # move approved assets from unreviewed to untracked
     for asset in assets_to_quarantine:
         i = i+1
         self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_quarantine), 'status': asset})
@@ -66,208 +94,179 @@ def quarantine_assets(self, assets):
         src = os.path.join(folder, filename)
         dest = os.path.join(cn4m_quarantine, filename)
 
-        # make sure file still exists and if so, move it
         if os.path.isfile(src):
-            # move files from repo to quarantine and remove from unreviewed_assets
+            # Move file and record it as a quarantined asset
             move_files(asset, src, dest)
             assets["untracked_quar_assets"][asset] = assets["unreviewed_assets"].pop(asset, None)
         else:
-            # flag file as no longer found and remove from unreviewed_assets
+            # File is gone — flag it so the user knows rather than silently dropping it
             assets["unreviewed_flags"][asset] = assets["unreviewed_assets"].pop(asset, None)
             assets["unreviewed_flags"][asset]["note"] = "marked for quarantine but no longer found"
             assets["unreviewed_flags"][asset]["severity"] = "warn"
-        
+
         time.sleep(sleep_time)
-            
+
     write_json_file(assets, "assets.json")
+
+    # Notify Discord with the list of quarantined files (only those actually moved, not flagged)
+    quarantined_data = {fid: assets["untracked_quar_assets"][fid] for fid in assets_to_quarantine if fid in assets["untracked_quar_assets"]}
+    notify_quarantined(quarantined_data)
+
     return {"current": len(assets_to_quarantine), "total": len(assets_to_quarantine), "status": "COMPLETE", "result": assets_to_quarantine}
-    #return "end"
 
 
-#@shared_task(name="app.tasks.check_assets")
+# ── Check assets ──────────────────────────────────────────────────────────────
+
 @celery.task(bind=True)
-#@shared_task
 def check_assets(self):
-    repo_folder = get_folder(cn4m_repo)           # create folder if doesnt exist
-    quar_folder = get_folder(cn4m_quarantine)     # create folder if doesnt exist
-    # repo_folder = get_folder("/cn4m_assets/repo")           # create folder if doesnt exist
-    # quar_folder = get_folder("/cn4m_assets/quarantine")     # create folder if doesnt exist
-    repo_files = get_files_from_folder(cn4m_repo)         # get files from repo
-    #assets = get_json_file(os.path.join(cn4m_folder, "assets.json"))      # load file or create object if doesnt exist
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
-    # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
+    """
+    Scan the repo folder for new files and extract their media metadata.
+
+    Files already in tracked or untracked buckets are skipped (no re-scanning).
+    New files are parsed with pymediainfo; files with no video width AND no audio
+    track are considered invalid/corrupt and moved to unreviewed_flags.
+    Valid new files are sorted alphabetically by dumbpath and added to unreviewed_assets.
+    """
+    repo_folder = get_folder(cn4m_repo)
+    quar_folder = get_folder(cn4m_quarantine)
+    repo_files = get_files_from_folder(cn4m_repo)
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+
     tracked_repo_assets = assets["tracked_repo_assets"]
     tracked_quar_assets = assets["tracked_quar_assets"]
     untracked_repo_assets = assets["untracked_repo_assets"]
     untracked_quar_assets = assets["untracked_quar_assets"]
-    #unreviewed_assets = assets["unreviewed_assets"]
-    unreviewed_assets = {}
-    # get all repo and reviewed assets so we dont recheck them (but okay to recheck quarantined ones)
-    # current_fileids = all_keys = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys(), unreviewed_assets.keys())
-    current_fileids = all_keys = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys())
+    unreviewed_assets = {}  # fresh dict — new discoveries only; existing unreviewed assets are merged in later
 
-    #print("repo_files" + str(repo_files))
+    # Build the set of already-known file IDs so we don't re-scan them
+    current_fileids = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys())
 
-    # iterate through each file
     i = 0
-    progress_qty = len(repo_files) * 2     # multiplying by 2 since we are checking then validating
+    progress_qty = len(repo_files) * 2  # x2: one pass for scanning, one for validation
+
+    # ── Pass 1: scan and extract metadata ─────────────────────────────────────
     for file in repo_files:
-        
         filename = os.path.basename(file)
         folder = str(os.path.normpath(os.path.dirname(file)))
         fileid = fast_hash(folder + "|" + filename)
 
-        # check assets
-        # only work on files that aren't excluded and arent already in assets.json
+        # Skip: macOS resource forks (._), excluded filenames, and already-known files
         if filename[0:2] != '._' and filename not in exclude_files and fileid not in current_fileids:
             unreviewed_assets = check_asset(unreviewed_assets, file, filename)
-            
-            #print(f"Processing... {progress}%")
             i = i+1
             self.update_state(state='PROGRESS', meta={'current': i, 'total': progress_qty, 'status': str("analyzing " + str(filename)) })
             time.sleep(sleep_time)
 
-    # validate assets
+    # ── Pass 2: validate — flag files with no video and no audio ──────────────
     invalid_assets = {}
     for asset in unreviewed_assets:
         if "width" not in unreviewed_assets[asset] and "audio" not in unreviewed_assets[asset]:
             invalid_assets[asset] = unreviewed_assets[asset]
             invalid_assets[asset]["note"] = "invalid or corrupt, ignoring"
             invalid_assets[asset]["severity"] = "warn"
-            #assets["unreviewed_flags"][asset] = invalid_assets[asset].pop(asset, None)
         i = i+1
         self.update_state(state='PROGRESS', meta={'current': i, 'total': progress_qty, 'status': str("validating " + str(unreviewed_assets[asset]["name"])) })
         time.sleep(sleep_time)
 
-    # move invalid assets to flagged assets
+    # Move invalid files to the flags bucket and remove them from the main set
     assets["unreviewed_flags"].update(invalid_assets)
     for asset in invalid_assets:
         del unreviewed_assets[asset]
 
-    # sort assets by dumbpath
+    # Sort valid new assets alphabetically by dumbpath (case-insensitive parent.filename)
     unreviewed_assets = dict(
         sorted(unreviewed_assets.items(), key=lambda item: item[1]["dumbpath"])
     )
 
-    # check unreviewed_assets in case sync.ffs_lock if it somehow sneaks in there
+    # Final safety net: purge any excluded filenames that slipped through
     purge_exclude_files(unreviewed_assets)
 
+    # Merge new discoveries into existing unreviewed_assets (preserves any not yet reviewed)
     assets["unreviewed_assets"].update(unreviewed_assets)
     write_json_file(assets, "assets.json")
 
     result = {
         "assets": unreviewed_assets,
         "flags": assets["unreviewed_flags"]
-        }
-
+    }
     return {"current": progress_qty, "total": progress_qty, "status": "COMPLETE", "result": result}
 
 
+# ── Track assets ──────────────────────────────────────────────────────────────
 
 @celery.task(bind=True)
 def track_assets(self):
-    # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
+    """
+    Push approved (untracked) assets to Google Sheets and move them to the tracked buckets.
+    Handles both repo and quarantine assets in one call.
+    Does nothing if there are no untracked assets.
+    """
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
     total = len(assets["untracked_repo_assets"]) + len(assets["untracked_quar_assets"])
-    
-    # only bother tracking if there are untracked assets
+
     if total > 0:
         sheet = connect_to_google_sheet()
-        setup_google_sheet(sheet)
+        setup_google_sheet(sheet)  # creates worksheets if they don't exist yet
         i = 0
+
+        # ── Repository assets ──────────────────────────────────────────────────
         repo_rows = []
         repo_assets_to_move = []
         for asset in assets["untracked_repo_assets"]:
             i = i+1
             repo_assets_to_move.append(asset)
-            asset = assets["untracked_repo_assets"][asset]
-            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': asset["name"]})
-            row = build_google_row(asset)
-            repo_rows.append(row)
+            asset_data = assets["untracked_repo_assets"][asset]
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': asset_data["name"]})
+            repo_rows.append(build_google_row(asset_data))
             time.sleep(sleep_time)
 
         update_google_sheet(sheet, "repository", repo_rows)
-        # move assets from untracked to tracked
         for asset in repo_assets_to_move:
             assets["tracked_repo_assets"][asset] = assets["untracked_repo_assets"].pop(asset, None)
 
+        # ── Quarantine assets ──────────────────────────────────────────────────
         quar_rows = []
         quar_assets_to_move = []
         for asset in assets["untracked_quar_assets"]:
             i = i+1
             quar_assets_to_move.append(asset)
-            asset = assets["untracked_quar_assets"][asset]
-            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': asset["name"]})
-            row = build_google_row(asset)
-            quar_rows.append(row)
+            asset_data = assets["untracked_quar_assets"][asset]
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': asset_data["name"]})
+            quar_rows.append(build_google_row(asset_data))
             time.sleep(sleep_time)
 
         update_google_sheet(sheet, "quarantine", quar_rows)
-        # move assets from untracked to tracked
         for asset in quar_assets_to_move:
             assets["tracked_quar_assets"][asset] = assets["untracked_quar_assets"].pop(asset, None)
 
         write_json_file(assets, "assets.json")
+        notify_tracked()
         return {"current": total, "total": total, "status": "COMPLETE", "result": "untracked items tracked"}
 
     else:
         return {"current": 0, "total": 0, "status": "COMPLETE", "result": "no assets to track"}
 
 
+# ── Clear flags ───────────────────────────────────────────────────────────────
 
 @celery.task(bind=True)
 def clear_flags(self):
-    # assets = get_json_file("/cn4m_assets/assets.json")      # load file or create object if doesnt exist
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))      # load file or create object if doesnt exist
+    """
+    Move all current unreviewed_flags → untracked_flags (archiving them) and reset
+    the unreviewed_flags bucket to empty. Called automatically after each asset check
+    so the flags panel stays fresh and only shows results from the latest scan.
+    """
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
     total = len(assets["unreviewed_flags"])
-    i = 0
-    # only bother tracking if there are untracked assets
+
     if total > 0:
         assets["untracked_flags"] = assets["unreviewed_flags"].copy()
         assets["unreviewed_flags"] = {}
-
         write_json_file(assets, "assets.json")
         return {"current": total, "total": total, "status": "COMPLETE", "result": "flags cleared"}
-
     else:
         return {"current": 0, "total": 0, "status": "COMPLETE", "result": "no flags to clear"}
 
 
-
-
-@shared_task
-def add_numbers(x, y):
-    """Simple Celery task that adds two numbers."""
-    return x + y
-
-
-
-@celery.task(bind=True)
-def long_task(self):
-    """Background task that runs a long function with progress reports."""
-    verb = ['Starting up', 'Booting', 'Repairing', 'Loading', 'Checking']
-    adjective = ['master', 'radiant', 'silent', 'harmonic', 'fast']
-    noun = ['solar array', 'particle reshaper', 'cosmic ray', 'orbiter', 'bit']
-    message = ''
-    total = random.randint(10, 50)
-    for i in range(total):
-        if not message or random.random() < 0.25:
-            message = '{0} {1} {2}...'.format(random.choice(verb),
-                                              random.choice(adjective),
-                                              random.choice(noun))
-        self.update_state(state='PROGRESS',
-                          meta={'current': i, 'total': total,
-                                'status': message})
-        time.sleep(1)
-    return {'current': 100, 'total': 100, 'status': 'Task completed!',
-            'result': 42}
-
-
-
 # Explicitly define what gets imported when using `from app.tasks import *`
-__all__ = ["check_assets", "add_numbers", "long_task", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "extract_audio"]
-
-
-
-
-
+__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "extract_audio"]
