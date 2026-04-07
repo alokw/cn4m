@@ -15,10 +15,10 @@ RUN pip install --trusted-host pypi.python.org -r requirements.txt
 #RUN apt-get -y update && apt-get -y upgrade && apt-get install -y --no-install-recommends ffmpeg
 
 # Pre-cache package list separately
-RUN apt-get update
+#RUN apt-get update
 
 # Install ffmpeg
-RUN apt-get install -y --no-install-recommends ffmpeg
+#RUN apt-get install -y --no-install-recommends ffmpeg
 
 # Copy the rest of the application files
 COPY . .

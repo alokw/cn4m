@@ -12,6 +12,7 @@
 4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`.
 5. **Extract Audio** — For audio-only files, wraps the audio in a tiny 16×16 HAP-encoded `.mov` so disguise/d3 media servers can play it back as a standard video asset.
 
+<<<<<<< HEAD
 ---
 
 ## Requirements
@@ -19,6 +20,13 @@
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows or Mac)
 - A Google Cloud service account with access to the target Google Sheet (see [Configuration](#configuration))
 - A Discord bot with a bot token and a target channel ID (see [Discord notifications](#discord-notifications))
+=======
+to-do
+add conversion buttons and aerender buttons
+update push to google to include flagged assets
+add nickname for hvc1 codec
+Add a way to select all assets in a specific parent folder
+>>>>>>> d0c9081d1569aa8e71a407cd52f72894c6516000
 
 ---
 
