@@ -117,6 +117,8 @@ function handle_check_assets_progress(status_task, status_url) {
                             <th class="pr-4 py-1"><input type="checkbox" onClick="toggle_checkboxes(this)" /></th>
                             <th class="pr-4" data-type="string">Folder</th>
                             <th class="pr-4" data-type="string">Name</th>
+                            <th class="pr-4" data-type="string">Version</th>
+                            <th class="pr-4" data-type="string">Ext</th>
                             <th class="pr-4" data-type="number">Duration</th>
                             <th class="pr-4" data-type="string">Codec</th>
                             <th class="pr-4" data-type="number">Width</th>
@@ -144,7 +146,16 @@ function handle_check_assets_progress(status_task, status_url) {
         for (const [key, value] of Object.entries(data['result']['assets'])) {
             obj = data['result']['assets'][key];
             fileid = key;
-            name = obj['name'] || "";
+            name = obj['basename'] || obj['name'] || "";  // basename excludes version + extension; falls back to full name
+            version = obj['version'] || "";
+            extension = obj['extension'] || "";
+            // Prepend an icon next to the version:
+            //   green up-arrow (version_up.svg) if basename matches an existing tracked/untracked asset
+            //   orange plus   (new_file.svg)   otherwise — treated as a brand-new asset
+            const version_icon = obj['is_version_up']
+                ? `<img src="/static/icons/version_up.svg" alt="version up" title="version up — basename matches an existing tracked/untracked asset" style="height: 1em; vertical-align: middle;">`
+                : `<img src="/static/icons/new_file.svg" alt="new file" title="new file — no matching basename in existing assets" style="height: 1em; vertical-align: middle;">`;
+            const version_cell = `${version_icon} ${version}`;
             parent = (obj['parent'] || "").replace(/ /g, '&nbsp;');  // preserve folder name spaces in HTML
             duration = obj['duration'] || "";
             video_codec = obj['video_codec'] || "";
@@ -163,6 +174,8 @@ function handle_check_assets_progress(status_task, status_url) {
                     <td class="pr-4 py-1"><input class="obx-checkbox" name="review_checkbox" type="checkbox" value="${fileid}"></td>
                     <td class="pr-4">${parent}</td>
                     <td class="pr-4">${name}</td>
+                    <td class="pr-4">${version_cell}</td>
+                    <td class="pr-4">${extension}</td>
                     <td class="pr-4">${duration}</td>
                     <td class="pr-4">${video_codec}</td>
                     <td class="pr-4">${width}</td>

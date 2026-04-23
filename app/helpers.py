@@ -10,6 +10,7 @@ from datetime import datetime
 from pymediainfo import MediaInfo
 from gspread_formatting import *
 import os
+import re
 import json
 import time
 import xxhash
@@ -251,6 +252,15 @@ def check_asset(assets, file, filename):
 
     assets[fileid] = {}
     assets[fileid]["name"] = filename
+
+    # Parse structured fields out of the filename (id, desc, screen, version, basename)
+    parsed = parse_asset_filename(filename)
+    assets[fileid]["id"] = parsed["id"]
+    assets[fileid]["desc"] = parsed["desc"]
+    assets[fileid]["screen"] = parsed["screen"]
+    assets[fileid]["version"] = parsed["version"]
+    assets[fileid]["basename"] = parsed["basename"]
+
     assets[fileid]["parent"] = parent
     assets[fileid]["folder"] = folder
     assets[fileid]["dumbpath"] = str(parent + "." + filename).casefold()  # used for case-insensitive sorting
@@ -327,6 +337,52 @@ def check_asset(assets, file, filename):
     return assets
 
 
+# ── Filename parsing ──────────────────────────────────────────────────────────
+
+# Matches asset filenames in the convention: {id}_{desc}_{screen}_{vVERSION}.{ext}
+#   id      — starts AND ends with a digit; may contain _ . - between digits (e.g. 1000, 1000-1005, 1000.1, 1000_100)
+#   desc    — any chars; may contain underscores (greedy match)
+#   screen  — any chars EXCEPT underscores (this is the boundary that makes parsing unambiguous)
+#   version — starts with lowercase 'v' followed by at least one digit, then any chars up to the file extension
+#             (the required digit prevents a screen tag that happens to start with 'v' from being misread as a version)
+ASSET_FILENAME_PATTERN = re.compile(
+    r'^(?P<id>[0-9][0-9_.\-]*[0-9]|[0-9])'
+    r'_(?P<desc>.+)'
+    r'_(?P<screen>[^_]+)'
+    r'_(?P<version>v[0-9][^.]*)'
+    r'\.[^.]+$'
+)
+
+def parse_asset_filename(filename):
+    """
+    Parse a filename like '1000_prestige_segment_trans_ab_v01_nlc.mov' into:
+      id        = '1000'
+      desc      = 'prestige_segment_trans'
+      screen    = 'ab'
+      version   = 'v01_nlc'
+      basename  = '1000_prestige_segment_trans_ab'  (everything except version and extension)
+
+    Returns a dict with all five keys. If the filename doesn't match the
+    expected convention, the four parsed fields default to empty strings,
+    but basename falls back to the full filename minus the extension
+    (so it's always usable as a display label).
+    """
+    m = ASSET_FILENAME_PATTERN.match(filename)
+    if m:
+        asset_id = m.group("id")
+        desc = m.group("desc")
+        screen = m.group("screen")
+        return {
+            "id": asset_id,
+            "desc": desc,
+            "screen": screen,
+            "version": m.group("version"),
+            "basename": f"{asset_id}_{desc}_{screen}",
+        }
+    # Non-conforming filename: fall back to filename-without-extension for basename
+    return {"id": "", "desc": "", "screen": "", "version": "", "basename": Path(filename).stem}
+
+
 # ── Hashing ───────────────────────────────────────────────────────────────────
 
 def fast_hash(input_string, length=32):
@@ -360,4 +416,4 @@ def cn4m_note(assets, note):
     print(note)
 
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note", "ffmpeg_extract_audio"]
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note", "ffmpeg_extract_audio", "parse_asset_filename"]
