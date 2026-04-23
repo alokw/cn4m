@@ -156,6 +156,12 @@ function handle_check_assets_progress(status_task, status_url) {
                 ? `<img src="/static/icons/version_up.svg" alt="version up" title="version up — basename matches an existing tracked/untracked asset" style="height: 1em; vertical-align: middle;">`
                 : `<img src="/static/icons/new_file.svg" alt="new file" title="new file — no matching basename in existing assets" style="height: 1em; vertical-align: middle;">`;
             const version_cell = `${version_icon} ${version}`;
+
+            // Prepend a file-type icon (audio / image / video) to the name, if we recognize the extension
+            const ext_icon_file = get_file_type_icon(extension);
+            const name_cell = ext_icon_file
+                ? `<img src="/static/icons/${ext_icon_file}" alt="${extension}" title="${extension}" style="height: 1em; vertical-align: middle;"> ${name}`
+                : name;
             parent = (obj['parent'] || "").replace(/ /g, '&nbsp;');  // preserve folder name spaces in HTML
             duration = obj['duration'] || "";
             video_codec = obj['video_codec'] || "";
@@ -173,7 +179,7 @@ function handle_check_assets_progress(status_task, status_url) {
                 <tr id="${fileid}" class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
                     <td class="pr-4 py-1"><input class="obx-checkbox" name="review_checkbox" type="checkbox" value="${fileid}"></td>
                     <td class="pr-4">${parent}</td>
-                    <td class="pr-4">${name}</td>
+                    <td class="pr-4">${name_cell}</td>
                     <td class="pr-4">${version_cell}</td>
                     <td class="pr-4">${extension}</td>
                     <td class="pr-4">${duration}</td>
@@ -274,6 +280,21 @@ function makeTableSortable() {
             rowsArray.forEach(row => tbody.appendChild(row));
         });
     });
+}
+
+
+// Map a file extension to its file-type icon filename, or null if unknown.
+// Extensions are matched case-insensitively.
+function get_file_type_icon(ext) {
+  if (!ext) return null;
+  const lower = String(ext).toLowerCase().replace(/^\./, '');
+  const audio = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
+  const image = ["png", "jpeg", "jpg", "tiff", "tif", "tga", "exr", "bmp", "gif", "webp", "dpx", "heic"];
+  const video = ["mov", "mkv", "mp4", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg"];
+  if (audio.includes(lower)) return "audio_file.svg";
+  if (image.includes(lower)) return "image_file.svg";
+  if (video.includes(lower)) return "video_file.svg";
+  return null;
 }
 
 
