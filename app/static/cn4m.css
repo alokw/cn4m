@@ -52,6 +52,28 @@ body {
 	border: 1px solid #F99D38;
 }
 
+.obx-select {
+	background-color: #3a3a3a;
+	border: 1px solid #606060;
+	border-radius: 6px;
+	color: #dfdfdf;
+	padding: 5px 10px;
+	font-size: 0.825em;
+	font-weight: 600;
+	cursor: pointer;
+	transition-duration: 0.3s;
+	outline: none;
+}
+
+.obx-select:hover {
+	border: 1px solid #F99D38;
+}
+
+.obx-select option {
+	background-color: #3a3a3a;
+	color: #dfdfdf;
+}
+
 
 .fs-7 {
 	  font-size: 0.825em; /* 14px/16=0.875em */

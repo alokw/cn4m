@@ -9,4 +9,5 @@ gspread-formatting
 xxhash
 ffmpeg-python
 requests
+pyyaml
 discord.py

@@ -1,0 +1,15 @@
+# project_config.yaml
+#
+# Project-level settings for the cn4m asset conformance tool.
+# These values are available as {field} tokens in ffmpeg preset configs.
+#
+# HOW TO UPDATE
+# ─────────────
+# Just edit the values below and save. No restart needed — the file is
+# read fresh every time a transcode task runs.
+
+# Target framerate for all ffmpeg output files.
+# Common values: 23.976, 24, 25, 29.97, 30, 59.94, 60
+# Fractional rates are automatically converted to ffmpeg's rational form
+# (e.g. 29.97 → 30000/1001).
+framerate: 29.97

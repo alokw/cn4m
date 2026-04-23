@@ -6,6 +6,7 @@
 from flask import Blueprint, jsonify, render_template, url_for, request
 from app.tasks import *
 from app import celery
+from app.helpers import get_ffmpeg_presets
 import os
 
 main = Blueprint("main", __name__)
@@ -26,6 +27,27 @@ def run_extract_audio(id):
     """Kick off audio extraction for a single asset by its fileid."""
     task = extract_audio.delay(id)
     print(id)
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
+@main.route('/ffmpeg_presets', methods=['GET'])
+def ffmpeg_presets():
+    """Return the list of available ffmpeg presets for the dropdown."""
+    return jsonify(get_ffmpeg_presets())
+
+@main.route('/transcode_assets', methods=['POST'])
+def run_transcode_assets():
+    """Transcode selected assets using the chosen ffmpeg preset."""
+    assets = request.form.get('javascript_data')
+    preset_name = request.form.get('preset_name')
+    task = transcode_assets.delay(assets, preset_name)
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
+@main.route('/quarantine_and_transcode', methods=['POST'])
+def run_quarantine_and_transcode():
+    """Transcode selected assets, then quarantine the originals."""
+    assets = request.form.get('javascript_data')
+    preset_name = request.form.get('preset_name')
+    task = quarantine_and_transcode.delay(assets, preset_name)
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
 @main.route('/check_assets', methods=['POST'])

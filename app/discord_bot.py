@@ -73,9 +73,11 @@ def notify_approved(assets: dict) -> bool:
     """
     if not assets:
         return True
-    lines = ["## new files approved"]
+    count = len(assets)
+    label = "asset" if count == 1 else "assets"
+    lines = [f"✅ **{count} {label} approved:**"]
     for asset in assets.values():
-        lines.append(f"- **{asset['parent']}** / {asset['name']}")
+        lines.append(f"• `{asset['parent']}/{asset['name']}`")
     return _send_chunked(lines)
 
 
@@ -86,12 +88,14 @@ def notify_quarantined(assets: dict) -> bool:
     """
     if not assets:
         return True
-    lines = ["## new files quarantined"]
+    count = len(assets)
+    label = "asset" if count == 1 else "assets"
+    lines = [f"🗑️ **{count} {label} quarantined:**"]
     for asset in assets.values():
-        lines.append(f"- **{asset['parent']}** / {asset['name']}")
+        lines.append(f"• `{asset['parent']}/{asset['name']}`")
     return _send_chunked(lines)
 
 
 def notify_tracked() -> bool:
     """Send a Discord message confirming assets were pushed to Google Sheets."""
-    return _send("## assets updated on google sheet")
+    return _send("📊 **Assets pushed to Google Sheet**")

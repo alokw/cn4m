@@ -1,0 +1,166 @@
+# ffmpeg_config.yaml
+#
+# FFmpeg command presets for the cn4m asset conformance tool.
+# Each preset defines an ffmpeg operation that can be triggered from the web UI.
+#
+# HOW TO ADD A NEW PRESET
+# ──────────────────────
+# 1. Copy an existing preset block (everything from "- name:" down to its last option).
+# 2. Paste it below the last preset.
+# 3. Fill in the fields:
+#      name        — short identifier used in the web app (no spaces, use underscores)
+#      label       — human-readable name shown on buttons/menus
+#      description — one-line explanation of what this preset does
+#      inputs      — list of ffmpeg input definitions
+#      outputs     — list of ffmpeg output definitions
+#      global_args — optional list of extra ffmpeg flags (e.g. mapping)
+#
+# FIELD REFERENCE
+# ───────────────
+#   Config values may contain {field} tokens that are substituted at runtime:
+#     - Project-level values (from config/project_config.yaml) are checked first
+#       e.g. {framerate} resolves to the project's target framerate
+#     - Per-asset metadata fields are available as fallback
+#       e.g. {width}, {height}, {video_codec}, {audio_rate}, etc.
+#
+#   inputs:
+#     - file:       path or ffmpeg source string (e.g. "color=c=black:s=16x16" for synthetic inputs)
+#       format:     optional input format flag (e.g. "lavfi" for libavfilter virtual inputs)
+#
+#   outputs:
+#     - suffix:     string appended to the original filename stem
+#                   e.g. stem="my_clip", suffix="_hapaudio" → "my_clip_hapaudio.mov"
+#       extension:  output file extension (e.g. "mov", "mp4", "wav")
+#       options:    key:value pairs passed as ffmpeg output options
+#                   keys are ffmpeg option names; values are strings or null (for flags)
+#
+#   global_args:
+#     - list of extra arguments appended to the ffmpeg command
+#       used for things like "-map 0:v -map 1:a"
+#
+# TIPS
+# ────
+# - Use "# " at the start of a line to add a comment (like this one).
+# - Indentation matters — use spaces, not tabs.
+# - Boolean / flag-style ffmpeg options should use null as the value (see "shortest" below).
+# - If a preset only needs one input, just list one under "inputs".
+
+
+presets:
+
+  # ── Extract Audio to HAP  ────────────────────────────────────────────────
+  # Wraps audio from any media file into a 16×16 black HAP video.
+  # Useful for disguise/d3 media servers that handle video files better than bare audio.
+
+  - name: extract_hap_audio
+    label: "Extract Audio to 16x16 HAP - Stereo"
+    description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
+    inputs:
+      - file: "color=c=black:s=16x16"
+        format: "lavfi"
+      - file: null                        # null means "use the selected asset's file path"
+    outputs:
+      - suffix: "_hapaudio"
+        extension: "mov"
+        options:
+          vcodec: "hap"
+          acodec: "pcm_s16le"
+          format: "mov"
+          vf: "fps={framerate}"
+          ar: 48000
+          tune: "stillimage"
+          shortest: null
+    global_args:
+      - "-map"
+      - "0:v"
+      - "-map"
+      - "1:a"
+
+  - name: extract_hap_audio
+    label: "Extract Audio to 16x16 HAP - Mono L (VO / Narration)"
+    description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
+    inputs:
+      - file: "color=c=black:s=16x16"
+        format: "lavfi"
+      - file: null                        # null means "use the selected asset's file path"
+    outputs:
+      - suffix: "_hapaudio"
+        extension: "mov"
+        options:
+          vcodec: "hap"
+          acodec: "pcm_s16le"
+          format: "mov"
+          vf: "fps={framerate}"
+          ar: 48000
+          af: "pan=stereo|c0=c0"
+          tune: "stillimage"
+          shortest: null
+    global_args:
+      - "-map"
+      - "0:v"
+      - "-map"
+      - "1:a"
+
+  - name: extract_hap_audio
+    label: "Extract Audio to 16x16 HAP - Mono R (Dialogue)"
+    description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
+    inputs:
+      - file: "color=c=black:s=16x16"
+        format: "lavfi"
+      - file: null                        # null means "use the selected asset's file path"
+    outputs:
+      - suffix: "_hapaudio"
+        extension: "mov"
+        options:
+          vcodec: "hap"
+          acodec: "pcm_s16le"
+          format: "mov"
+          vf: "fps={framerate}"
+          ar: 48000
+          af: "pan=stereo|c1=c0"
+          tune: "stillimage"
+          shortest: null
+    global_args:
+      - "-map"
+      - "0:v"
+      - "-map"
+      - "1:a"
+
+  # ── Transcode to H.264 ────────────────────────────────────────────────────────
+  # Creates a lightweight H.264 review proxy from any video file.
+
+  - name: transcode_h264
+    label: "Transcode to H.264"
+    description: "Creates an H.264 MP4 review proxy at the original resolution."
+    inputs:
+      - file: null                        # uses the selected asset's file path
+    outputs:
+      - suffix: "_h264"
+        extension: "mp4"
+        options:
+          vcodec: "libx264"
+          crf: "23"
+          preset: "medium"
+          acodec: "aac"
+          ar: 48000
+          ac: 2
+    global_args: []
+
+
+  # ── Extract WAV Audio ─────────────────────────────────────────────────────────
+  # Strips the audio track(s) into a standalone WAV file.
+
+  - name: extract_wav
+    label: "Extract WAV"
+    description: "Exports audio as a 48kHz 16-bit stereo WAV file."
+    inputs:
+      - file: null
+    outputs:
+      - suffix: "_audio"
+        extension: "wav"
+        options:
+          acodec: "pcm_s16le"
+          ar: 48000
+          ac: 2
+          vn: null
+    global_args: []

@@ -17,6 +17,7 @@ import xxhash
 import gspread
 import errno
 import ffmpeg
+import yaml
 import shutil
 
 
@@ -31,6 +32,8 @@ exclude_files = os.getenv("EXCLUDE_FILES").split(", ")  # Filenames to skip duri
 cn4m_folder = "/cn4m_assets"
 cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
 cn4m_repo = os.path.join(cn4m_folder, "repo")
+ffmpeg_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'ffmpeg_config.yaml')
+project_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'project_config.yaml')
 
 
 # ── Audio extraction ──────────────────────────────────────────────────────────
@@ -76,6 +79,92 @@ def ffmpeg_extract_audio(in_filename):
     return in_filename
 
 
+def load_ffmpeg_config():
+    """Load and return the ffmpeg config YAML as a dict."""
+    with open(ffmpeg_config_path, 'r') as f:
+        return yaml.safe_load(f)
+
+
+def load_project_config():
+    """Load and return the project config YAML as a dict."""
+    if os.path.isfile(project_config_path):
+        with open(project_config_path, 'r') as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def ffmpeg_framerate(fps):
+    """Convert a decimal framerate to ffmpeg's rational form where applicable."""
+    if fps is None:
+        return "24"
+    fps = float(fps)
+    fractional = {
+        23.976: "24000/1001",
+        29.97: "30000/1001",
+        59.94: "60000/1001",
+        14.985: "15000/1001",
+    }
+    for key, value in fractional.items():
+        if abs(fps - key) < 0.015:
+            return value
+    return str(int(fps)) if fps == int(fps) else str(fps)
+
+
+def get_ffmpeg_presets():
+    """Return a list of {name, label, description} dicts for all presets in the config."""
+    config = load_ffmpeg_config()
+    return [{"name": p["name"], "label": p["label"], "description": p["description"]} for p in config.get("presets", [])]
+
+
+def run_ffmpeg_preset(preset, src_path, asset_data=None):
+    """
+    Build and execute an ffmpeg command from a preset config dict against a source file.
+    Config values may contain {field} tokens (e.g. {framerate}, {width}) which are
+    replaced from project_config.yaml first, then asset_data as fallback.
+    Returns the output file path on success, or raises on failure.
+    """
+    inputs = []
+    for inp in preset['inputs']:
+        file = inp['file'] if inp['file'] is not None else src_path
+        kwargs = {}
+        if inp.get('format'):
+            kwargs['f'] = inp['format']
+        inputs.append(ffmpeg.input(file, **kwargs))
+
+    output_config = preset['outputs'][0]
+    p = Path(src_path)
+    out_path = str(p.parent / (p.stem + output_config['suffix'] + '.' + output_config['extension']))
+
+    options = {}
+    project_config = load_project_config()
+    for key, value in output_config['options'].items():
+        if isinstance(value, str):
+            subs = {}
+            if asset_data:
+                subs.update({k: v for k, v in asset_data.items() if v is not None})
+            subs.update({k: v for k, v in project_config.items() if v is not None})
+            if 'framerate' in subs:
+                subs['framerate'] = ffmpeg_framerate(subs['framerate'])
+            value = value.format(**subs)
+        options[key] = value
+
+    stream = ffmpeg.output(*inputs, out_path, **options)
+
+    global_args = preset.get('global_args') or []
+    if global_args:
+        stream = stream.global_args(*global_args)
+
+    stream = stream.overwrite_output()
+    print(f"ffmpeg command: {' '.join(stream.compile())}")
+    try:
+        stdout, stderr = stream.run(capture_stdout=True, capture_stderr=True)
+        print(stderr)
+    except ffmpeg.Error as e:
+        print(f"ffmpeg stderr: {e.stderr.decode()}")
+        raise
+    return out_path
+
+
 # ── Google Sheets ─────────────────────────────────────────────────────────────
 
 def connect_to_google_sheet():
@@ -84,18 +173,44 @@ def connect_to_google_sheet():
     sheet = gc.open_by_key(google_sheet)
     return sheet
 
+def _file_type_emoji(ext):
+    if not ext:
+        return ""
+    lower = str(ext).lower().replace(".", "")
+    audio = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"]
+    image = ["png", "jpeg", "jpg", "tiff", "tif", "tga", "exr", "bmp", "gif", "webp", "dpx", "heic"]
+    video = ["mov", "mkv", "mp4", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg"]
+    if lower in audio:
+        return "🎵 "
+    if lower in image:
+        return "🖼️ "
+    if lower in video:
+        return "🎬 "
+    return ""
+
+
 def build_google_row(asset):
     """
     Convert an asset dict into a flat list of values matching the sheet column order:
-    STATUS | PARENT | NAME | DURATION | NOTES | CODEC | WIDTH | HEIGHT | FPS |
-    AUDIO | RATE | BITS | CH | SIZE | CREATED | MODIFIED | PROCESSED | FOLDER
+    STATUS | PARENT | NAME | VERSION | NOTES | DURATION | SCREEN | EXT | CODEC |
+    WIDTH | HEIGHT | FPS | AUDIO | RATE | BITS | CH | SIZE | CREATED | MODIFIED | PROCESSED | FOLDER
     """
     row = []
     row.append("received")                                                    # STATUS — default on arrival
     row.append(asset["parent"])
-    row.append(asset["name"])
-    row.append(asset["duration"]) if "duration" in asset else row.append("")
+    basename = asset.get("basename") or asset["name"]
+    ext = asset.get("extension", "")
+    row.append(_file_type_emoji(ext) + basename)
+    version = asset.get("version", "")
+    if version:
+        prefix = "☝️ " if asset.get("is_version_up") else "🆕 "
+        row.append(prefix + version)
+    else:
+        row.append("")
     row.append("")                                                            # NOTES — left blank for manual entry
+    row.append(asset["duration"]) if "duration" in asset else row.append("")
+    row.append(asset.get("screen", ""))
+    row.append(ext)
     row.append(asset["video_codec"]) if "video_codec" in asset else row.append("")
     row.append(asset["width"]) if "width" in asset else row.append("")
     row.append(asset["height"]) if "height" in asset else row.append("")
@@ -133,7 +248,7 @@ def setup_google_sheet(sheet):
     headers, formatting, frozen header row, column widths, and a STATUS dropdown.
     Safe to call repeatedly — only creates sheets that are missing.
     """
-    headers = [ "STATUS", "PARENT", "NAME", "DURATION", "NOTES", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
+    headers = [ "STATUS", "PARENT", "NAME", "VERSION", "NOTES", "DURATION", "SCREEN", "EXT", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
 
     worksheet_objs = sheet.worksheets()
     worksheets_list = [w.title for w in worksheet_objs]
@@ -144,7 +259,7 @@ def setup_google_sheet(sheet):
             current_worksheet = sheet.worksheet(w)
         else:
             # Sheet doesn't exist — create it and apply all formatting
-            current_worksheet = sheet.add_worksheet(title=w, rows=100, cols=16)
+            current_worksheet = sheet.add_worksheet(title=w, rows=100, cols=21)
             current_worksheet.update(range_name='1:1', values=[headers])
             current_worksheet.format('1:1', {
                 "backgroundColor": { "red": 0.0, "green": 0.0, "blue": 0.0 },
@@ -154,14 +269,19 @@ def setup_google_sheet(sheet):
                     }
                 })
             general_formatting = cellFormat(horizontalAlignment='LEFT')
-            # STATUS column gets a dropdown so users can track each asset's progress
             validation_rule = DataValidationRule(
                 BooleanCondition('ONE_OF_LIST', ['received', 'ingested', 'programmed', 'waiting', 'problem']),
                 showCustomUi=True
             )
-            format_cell_range(current_worksheet, 'A:Q', general_formatting)
+            format_cell_range(current_worksheet, 'A:U', general_formatting)
             set_frozen(current_worksheet, rows=1)
-            set_column_widths(current_worksheet, [ ('A', 100), ('B', 175), ('C', 400), ('D', 90), ('E', 175), ('F', 90), ('G', 65), ('H', 65), ('I', 55), ('J', 55), ('K', 55), ('L', 55), ('M', 55), ('N', 75), ('O', 135), ('P', 135), ('Q', 135), ('R', 265) ])
+            set_column_widths(current_worksheet, [
+                ('A', 100), ('B', 175), ('C', 400), ('D', 100),
+                ('E', 175), ('F', 90), ('G', 90), ('H', 75), ('I', 90),
+                ('J', 65), ('K', 65), ('L', 55), ('M', 55), ('N', 55),
+                ('O', 55), ('P', 55), ('Q', 75), ('R', 135), ('S', 135),
+                ('T', 135), ('U', 265)
+            ])
             set_data_validation_for_cell_range(current_worksheet, 'A2:A2000', validation_rule)
 
 
@@ -416,4 +536,4 @@ def cn4m_note(assets, note):
     print(note)
 
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note", "ffmpeg_extract_audio", "parse_asset_filename"]
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note", "ffmpeg_extract_audio", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename"]

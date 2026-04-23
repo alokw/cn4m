@@ -47,6 +47,123 @@ def extract_audio(self, asset):
     return {"current": 1, "total": 1, "status": "COMPLETE", "result": result}
 
 
+# ── Transcode assets ──────────────────────────────────────────────────────────
+
+@celery.task(bind=True)
+def transcode_assets(self, assets_json, preset_name):
+    """
+    Transcode selected assets one at a time using the named ffmpeg preset
+    from config/ffmpeg_config.yaml. Reports progress per asset.
+    """
+    assets_to_transcode = json.loads(assets_json)
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+
+    config = load_ffmpeg_config()
+    preset = next((p for p in config.get("presets", []) if p["name"] == preset_name), None)
+
+    if preset is None:
+        return {"current": 0, "total": 0, "status": "COMPLETE", "result": f"preset '{preset_name}' not found"}
+
+    i = 0
+    for asset_id in assets_to_transcode:
+        i += 1
+        asset_data = assets["unreviewed_assets"].get(asset_id)
+        if not asset_data:
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_transcode), 'status': f"skipped {asset_id} (not found)"})
+            continue
+
+        folder = asset_data["folder"]
+        filename = asset_data["name"]
+        src = os.path.join(folder, filename)
+
+        self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_transcode), 'status': filename})
+
+        try:
+            run_ffmpeg_preset(preset, src, asset_data=asset_data)
+        except Exception as e:
+            print(f"Error transcoding {src} with preset '{preset_name}': {e}")
+
+        time.sleep(sleep_time)
+
+    check_assets.delay()
+    return {"current": len(assets_to_transcode), "total": len(assets_to_transcode), "status": "COMPLETE", "result": f"transcoded {len(assets_to_transcode)} asset(s) with '{preset_name}'"}
+
+
+# ── Quarantine & transcode assets ────────────────────────────────────────────
+
+@celery.task(bind=True)
+def quarantine_and_transcode(self, assets_json, preset_name):
+    """
+    Transcode selected assets one at a time, then move the originals to quarantine.
+    Progress is reported across both phases as a single continuous count.
+    """
+    assets_to_process = json.loads(assets_json)
+    total = len(assets_to_process) * 2
+    i = 0
+
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+
+    config = load_ffmpeg_config()
+    preset = next((p for p in config.get("presets", []) if p["name"] == preset_name), None)
+
+    if preset is None:
+        return {"current": 0, "total": 0, "status": "COMPLETE", "result": f"preset '{preset_name}' not found"}
+
+    # ── Phase 1: Transcode ──────────────────────────────────────────────────
+    for asset_id in assets_to_process:
+        i += 1
+        asset_data = assets["unreviewed_assets"].get(asset_id)
+        if not asset_data:
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': f"skipped {asset_id} (not found)"})
+            continue
+
+        filename = asset_data["name"]
+        src = os.path.join(asset_data["folder"], filename)
+
+        self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': f"transcoding {filename}"})
+
+        try:
+            run_ffmpeg_preset(preset, src, asset_data=asset_data)
+        except Exception as e:
+            print(f"Error transcoding {src} with preset '{preset_name}': {e}")
+
+        time.sleep(sleep_time)
+
+    # Reload assets in case the transcode triggered a check_assets
+    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+
+    # ── Phase 2: Quarantine originals ───────────────────────────────────────
+    for asset_id in assets_to_process:
+        i += 1
+        asset_data = assets["unreviewed_assets"].get(asset_id)
+        if not asset_data:
+            continue
+
+        filename = asset_data["name"]
+        src = os.path.join(asset_data["folder"], filename)
+        dest = os.path.join(cn4m_quarantine, filename)
+
+        self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': f"quarantining {filename}"})
+
+        if os.path.isfile(src):
+            move_files(asset_id, src, dest)
+            assets["untracked_quar_assets"][asset_id] = assets["unreviewed_assets"].pop(asset_id)
+        else:
+            assets["unreviewed_flags"][asset_id] = assets["unreviewed_assets"].pop(asset_id)
+            assets["unreviewed_flags"][asset_id]["note"] = "marked for quarantine but no longer found"
+            assets["unreviewed_flags"][asset_id]["severity"] = "warn"
+
+        time.sleep(sleep_time)
+
+    write_json_file(assets, "assets.json")
+
+    quarantined_data = {fid: assets["untracked_quar_assets"][fid] for fid in assets_to_process if fid in assets["untracked_quar_assets"]}
+    notify_quarantined(quarantined_data)
+
+    check_assets.delay()
+    return {"current": total, "total": total, "status": "COMPLETE", "result": f"transcoded and quarantined {len(assets_to_process)} asset(s) with '{preset_name}'"}
+
+
 # ── Approve assets ────────────────────────────────────────────────────────────
 
 @celery.task(bind=True)
@@ -284,4 +401,4 @@ def clear_flags(self):
 
 
 # Explicitly define what gets imported when using `from app.tasks import *`
-__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "extract_audio"]
+__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "extract_audio", "transcode_assets", "quarantine_and_transcode"]

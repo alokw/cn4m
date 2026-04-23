@@ -28,8 +28,54 @@ function track_assets() {
   ajax_post_simple('/track_assets')
 }
 
-function extractAudio(id){
-  ajax_post_simple('/extract_audio/' + id)
+
+// ── Preset loader ─────────────────────────────────────────────────────────────
+// Fetches the available ffmpeg presets from the backend and populates the dropdown.
+
+function load_ffmpeg_presets() {
+  $.getJSON('/ffmpeg_presets', function(presets) {
+    var $select = $('#ffmpeg-preset-select');
+    $select.find('option:not(:first)').remove();
+    $.each(presets, function(i, preset) {
+      $select.append($('<option>', { value: preset.name, text: preset.label }));
+    });
+  });
+}
+
+
+// ── Transcode ─────────────────────────────────────────────────────────────────
+
+function transcode_assets() {
+  var selected = get_selected_assets();
+  if (selected.length === 0) {
+    alert('Please select at least one asset.');
+    return;
+  }
+  var preset_name = $('#ffmpeg-preset-select').val();
+  if (!preset_name) {
+    alert('Please select a preset.');
+    return;
+  }
+  ajax_post_transcode('/transcode_assets', selected, preset_name);
+  $('input[name="review_checkbox"]').prop('checked', false);
+  document.querySelector('th input[type="checkbox"]').checked = false;
+}
+
+function quarantine_and_transcode() {
+  var selected = get_selected_assets();
+  if (selected.length === 0) {
+    alert('Please select at least one asset.');
+    return;
+  }
+  var preset_name = $('#ffmpeg-preset-select').val();
+  if (!preset_name) {
+    alert('Please select a preset.');
+    return;
+  }
+  ajax_post_transcode('/quarantine_and_transcode', selected, preset_name);
+  $('input[name="review_checkbox"]').prop('checked', false);
+  document.querySelector('th input[type="checkbox"]').checked = false;
+  remove_assets_from_table(selected);
 }
 
 
@@ -81,6 +127,22 @@ function update_progress(status_task, status_url) {
       // check_assets has its own handler because it also builds the results table
       handle_check_assets_progress(status_task, status_url);
       break;
+
+    case "transcode_assets":
+      msg_destination = "#review_asset_progress"
+      msg_pending = "Starting Transcode"
+      msg_progress = "Transcoding"
+      msg_complete = "Transcode Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      break;
+
+    case "quarantine_and_transcode":
+      msg_destination = "#review_asset_progress"
+      msg_pending = "Starting Quarantine & Transcode"
+      msg_progress = "Processing"
+      msg_complete = "Quarantine & Transcode Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      break;
   }
 }
 
@@ -117,6 +179,7 @@ function handle_check_assets_progress(status_task, status_url) {
                             <th class="pr-4 py-1"><input type="checkbox" onClick="toggle_checkboxes(this)" /></th>
                             <th class="pr-4" data-type="string">Folder</th>
                             <th class="pr-4" data-type="string">Name</th>
+                            <th class="pr-4" data-type="string">Screen / Stem</th>
                             <th class="pr-4" data-type="string">Version</th>
                             <th class="pr-4" data-type="string">Ext</th>
                             <th class="pr-4" data-type="number">Duration</th>
@@ -129,7 +192,6 @@ function handle_check_assets_progress(status_task, status_url) {
                             <th class="pr-4" data-type="number">Bits</th>
                             <th class="pr-4" data-type="number">Ch</th>
                             <th class="pr-4" data-type="string">Size</th>
-                            <th class="pr-4" data-type="string">Actions</th>
                         </tr>
                     </thead>
                     <tbody>`;
@@ -163,6 +225,7 @@ function handle_check_assets_progress(status_task, status_url) {
                 ? `<img src="/static/icons/${ext_icon_file}" alt="${extension}" title="${extension}" style="height: 1em; vertical-align: middle;"> ${name}`
                 : name;
             parent = (obj['parent'] || "").replace(/ /g, '&nbsp;');  // preserve folder name spaces in HTML
+            screen = obj['screen'] || "";
             duration = obj['duration'] || "";
             video_codec = obj['video_codec'] || "";
             width = obj['width'] || "";
@@ -180,6 +243,7 @@ function handle_check_assets_progress(status_task, status_url) {
                     <td class="pr-4 py-1"><input class="obx-checkbox" name="review_checkbox" type="checkbox" value="${fileid}"></td>
                     <td class="pr-4">${parent}</td>
                     <td class="pr-4">${name_cell}</td>
+                    <td class="pr-4">${screen}</td>
                     <td class="pr-4">${version_cell}</td>
                     <td class="pr-4">${extension}</td>
                     <td class="pr-4">${duration}</td>
@@ -192,7 +256,6 @@ function handle_check_assets_progress(status_task, status_url) {
                     <td class="pr-4">${audio_bits}</td>
                     <td class="pr-4">${audio_channels}</td>
                     <td class="pr-4">${size}</td>
-                    <td class="pr-4"><button class="obx-actionbutton" title="Extract Audio to HAP proxy" value="${fileid}" onclick="extractAudio(this.value)">&#9836</button></td>
                 </tr>`;
         }
 
@@ -204,6 +267,8 @@ function handle_check_assets_progress(status_task, status_url) {
         // Insert the table into the DOM, then attach sort listeners
         $('#results').html(asset_table);
         makeTableSortable();
+        $('#review-actions').show();
+        $('.review-buttons').show();
 
         // ── Flag display ───────────────────────────────────────────────────────
         // Show any flagged (invalid/missing) files below the table, then clear them
@@ -256,14 +321,29 @@ function makeTableSortable() {
 
         header.addEventListener("click", () => {
             const dataType = header.getAttribute("data-type") || "string";
+            const isScreenCol = header.textContent.trim() === "Screen / Stem";
+            const extColIndex = isScreenCol ? Array.from(headers).findIndex(h => h.textContent.trim() === "Ext") : -1;
             let rowsArray = Array.from(tbody.querySelectorAll("tr"));
+
+            const audioExts = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
 
             rowsArray.sort((rowA, rowB) => {
                 let cellA = rowA.children[colIndex]?.innerText.trim() || "";
                 let cellB = rowB.children[colIndex]?.innerText.trim() || "";
 
                 let comparison = 0;
-                if (dataType === "number") {
+
+                if (isScreenCol && extColIndex >= 0) {
+                    const extA = (rowA.children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
+                    const extB = (rowB.children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
+                    const isAudioA = audioExts.includes(extA);
+                    const isAudioB = audioExts.includes(extB);
+                    if (isAudioA !== isAudioB) {
+                        comparison = isAudioA ? -1 : 1;
+                    } else {
+                        comparison = cellA.localeCompare(cellB);
+                    }
+                } else if (dataType === "number") {
                     comparison = (parseFloat(cellA) || 0) - (parseFloat(cellB) || 0);
                 } else {
                     comparison = cellA.localeCompare(cellB);
@@ -299,6 +379,25 @@ function get_file_type_icon(ext) {
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function select_all_audio() {
+  var audioExts = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
+  var table = document.getElementById("sortableTable");
+  if (!table) return;
+  var headers = table.querySelectorAll("thead th");
+  var extColIndex = Array.from(headers).findIndex(h => h.textContent.trim() === "Ext");
+  if (extColIndex < 0) return;
+
+  var rows = table.querySelectorAll("tbody tr");
+  for (var i = 0; i < rows.length; i++) {
+    var ext = (rows[i].children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
+    var checkbox = rows[i].querySelector("input[name='review_checkbox']");
+    if (checkbox && audioExts.includes(ext)) {
+      checkbox.checked = true;
+    }
+  }
+  document.querySelector('th input[type="checkbox"]').checked = false;
+}
 
 // Toggle all review checkboxes on/off using the header checkbox
 function toggle_checkboxes(source) {
@@ -377,6 +476,25 @@ function ajax_post_with_selection(url, selected_assets) {
     url: url,
     data: {
         javascript_data: JSON.stringify(selected_assets)
+    },
+    success: function(data, status, request) {
+        status_url = request.getResponseHeader('Location');
+        update_progress(url, status_url);
+    },
+    error: function(XMLHttpRequest, textStatus, errorThrown) {
+        alert(textStatus + ': ' + errorThrown);
+    }
+  });
+}
+
+// POST selected assets + chosen preset name; used for transcode
+function ajax_post_transcode(url, selected_assets, preset_name) {
+  $.ajax({
+    type: 'POST',
+    url: url,
+    data: {
+        javascript_data: JSON.stringify(selected_assets),
+        preset_name: preset_name
     },
     success: function(data, status, request) {
         status_url = request.getResponseHeader('Location');

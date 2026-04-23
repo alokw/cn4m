@@ -36,12 +36,26 @@
     </div>
 
     <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
-        <div class="pb-2 text-uppercase fw-semibold obx-orange">2. review assets</div>
+        <div class="d-flex justify-content-between align-items-center pb-2">
+            <div class="text-uppercase fw-semibold obx-orange">2. review assets</div>
+            <button id="select-audio" class="obx-button review-buttons" style="display:none;">SELECT ALL AUDIO</button>
+        </div>
         <div id="results"></div>
-        <!--<button id="select-all" class="obx-button">SELECT ALL</button>
-        <button id="unselect-all" class="obx-button">UN-SELECT ALL</button>-->
-        <button id="quarantine-assets" class="obx-button">QUARANTINE SELECTED</button>
-        <button id="approve-assets" class="obx-button">APPROVE SELECTED</button><br />
+        <div id="review-actions" style="display:none;">
+            <div class="d-flex justify-content-between align-items-center flex-wrap">
+                <div>
+                    <button id="quarantine-assets" class="obx-button">QUARANTINE SELECTED</button>
+                    <button id="approve-assets" class="obx-button">APPROVE SELECTED</button>
+                </div>
+                <div>
+                    <select id="ffmpeg-preset-select" class="obx-select">
+                        <option value="">Select preset...</option>
+                    </select>
+                    <button id="transcode-assets" class="obx-button">TRANSCODE</button>
+                    <button id="quarantine-transcode-assets" class="obx-button">QUARANTINE & TRANSCODE</button>
+                </div>
+            </div>
+        </div>
         <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_flags"></span></div>
         <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_progress"></span></div>
     </div>
@@ -60,8 +74,10 @@ $(function() { $('#check-assets').click(check_assets); });
 $(function() { $('#approve-assets').click(approve_assets); });
 $(function() { $('#quarantine-assets').click(quarantine_assets); });
 $(function() { $('#track-assets').click(track_assets); });
-//$(function() { $('#extract-audio').click(extract_audio("test")); });
-//$(function() { $('#clear-flags').click(clear_flags); });
+$(function() { $('#transcode-assets').click(transcode_assets); });
+$(function() { $('#quarantine-transcode-assets').click(quarantine_and_transcode); });
+$(function() { $('#select-audio').click(select_all_audio); });
+$(load_ffmpeg_presets);
 
 </script>
 </body>
