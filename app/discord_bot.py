@@ -7,6 +7,8 @@ import os
 import requests
 import logging
 
+from app.helpers import _file_type_emoji
+
 logger = logging.getLogger(__name__)
 
 # Read credentials once at import time
@@ -66,10 +68,22 @@ def _send_chunked(lines: list) -> bool:
 
 # ── Public notification functions ─────────────────────────────────────────────
 
+def _asset_line_prefix(asset: dict) -> str:
+    """
+    Build the two-emoji prefix used in approved/quarantined notifications:
+      first emoji  — ☝️ if this is a version-up of an existing asset, otherwise 🆕
+      second emoji — 🎵 audio, 🖼️ image, 🎬 video (or empty if extension unrecognized)
+    """
+    version_emoji = "☝️" if asset.get("is_version_up") else "🆕"
+    type_emoji = _file_type_emoji(asset.get("extension", "")).strip()
+    # Trailing space if a type emoji was returned, otherwise just the version emoji + space
+    return f"{version_emoji} {type_emoji} ".replace("  ", " ")
+
+
 def notify_approved(assets: dict) -> bool:
     """
     Send a Discord message listing newly approved assets.
-    assets: dict of {fileid: asset_data} — only parent and name are included.
+    Each item is prefixed with a version-status emoji and a file-type emoji.
     """
     if not assets:
         return True
@@ -77,14 +91,14 @@ def notify_approved(assets: dict) -> bool:
     label = "asset" if count == 1 else "assets"
     lines = [f"✅ **{count} {label} approved:**"]
     for asset in assets.values():
-        lines.append(f"• `{asset['parent']}/{asset['name']}`")
+        lines.append(f"• {_asset_line_prefix(asset)}`{asset['parent']}/{asset['name']}`")
     return _send_chunked(lines)
 
 
 def notify_quarantined(assets: dict) -> bool:
     """
     Send a Discord message listing newly quarantined assets.
-    assets: dict of {fileid: asset_data} — only parent and name are included.
+    Each item is prefixed with a version-status emoji and a file-type emoji.
     """
     if not assets:
         return True
@@ -92,7 +106,7 @@ def notify_quarantined(assets: dict) -> bool:
     label = "asset" if count == 1 else "assets"
     lines = [f"🗑️ **{count} {label} quarantined:**"]
     for asset in assets.values():
-        lines.append(f"• `{asset['parent']}/{asset['name']}`")
+        lines.append(f"• {_asset_line_prefix(asset)}`{asset['parent']}/{asset['name']}`")
     return _send_chunked(lines)
 
 
