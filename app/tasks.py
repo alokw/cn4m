@@ -294,16 +294,19 @@ def check_assets(self):
     # Collect basenames of all repo assets we've already seen (tracked + untracked).
     # Checks both "basename" (current naming) and "asset_basename" (older entries)
     # so existing assets.json files don't need to be migrated.
+    # Comparison is case-insensitive — basenames are lowercased on both sides
+    # so e.g. "100_TeSt_A" (existing) matches "100_test_a" (new).
     existing_basenames = set()
     for bucket in (tracked_repo_assets, untracked_repo_assets):
         for existing in bucket.values():
             bn = existing.get("basename") or existing.get("asset_basename")
             if bn:
-                existing_basenames.add(bn)
+                existing_basenames.add(bn.casefold())
 
     # Flag any new asset whose basename matches an existing repo asset (i.e. it's a new version)
     for asset in unreviewed_assets.values():
-        asset["is_version_up"] = bool(asset.get("basename")) and asset["basename"] in existing_basenames
+        bn = asset.get("basename")
+        asset["is_version_up"] = bool(bn) and bn.casefold() in existing_basenames
 
     # Sort valid new assets alphabetically by dumbpath (case-insensitive parent.filename)
     unreviewed_assets = dict(
