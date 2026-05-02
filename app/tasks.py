@@ -267,8 +267,8 @@ def check_assets(self):
         folder = str(os.path.normpath(os.path.dirname(file)))
         fileid = fast_hash(folder + "|" + filename)
 
-        # Skip: macOS resource forks (._), excluded filenames, and already-known files
-        if filename[0:2] != '._' and filename not in exclude_files and fileid not in current_fileids:
+        # Skip: excluded filenames (matched with wildcards via is_excluded) and already-known files
+        if not is_excluded(filename) and fileid not in current_fileids:
             unreviewed_assets = check_asset(unreviewed_assets, file, filename)
             i = i+1
             self.update_state(state='PROGRESS', meta={'current': i, 'total': progress_qty, 'status': str("analyzing " + str(filename)) })

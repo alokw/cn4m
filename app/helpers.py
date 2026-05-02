@@ -13,6 +13,7 @@ import os
 import re
 import json
 import time
+import fnmatch
 import xxhash
 import gspread
 import errno
@@ -27,6 +28,9 @@ google_creds = os.getenv("GOOGLE_CREDS")          # JSON string for the Google s
 google_sheet = os.getenv("GOOGLE_SHEET")          # Google Sheets document ID
 sleep_time = float(os.getenv("TIME_BETWEEN_CHECKS"))  # Small delay between file ops to keep Celery progress updates responsive
 exclude_files = os.getenv("EXCLUDE_FILES").split(", ")  # Filenames to skip during scanning
+# Folder names to skip entirely during scanning. Robust to missing/empty env var.
+_exclude_folders_raw = os.getenv("EXCLUDE_FOLDERS", "")
+exclude_folders = [p.strip() for p in _exclude_folders_raw.split(",") if p.strip()]
 
 # Docker container paths (the host folders are mounted here via docker-compose volumes)
 cn4m_folder = "/cn4m_assets"
@@ -308,10 +312,18 @@ def move_files(uid, src, dst):
         print(f"Permission error moving {src} → {dst}")
 
 def get_files_from_folder(folder):
-    """Return a sorted list of all file paths found recursively under folder."""
-    files = [os.path.join(dp, f) for dp, dn, fn in os.walk(os.path.expanduser(folder)) for f in fn]
-    sorted_files = sorted(files)
-    return sorted_files
+    """
+    Return a sorted list of all file paths found recursively under folder.
+    Skips any subdirectory whose name matches an EXCLUDE_FOLDERS pattern —
+    pruned in-place during os.walk so excluded trees aren't descended into at all.
+    """
+    files = []
+    for dp, dn, fn in os.walk(os.path.expanduser(folder)):
+        # Modify dn in-place so os.walk skips these subdirectories entirely
+        dn[:] = [d for d in dn if not is_folder_excluded(d)]
+        for f in fn:
+            files.append(os.path.join(dp, f))
+    return sorted(files)
 
 def get_folder(folder):
     """Return folder path, creating it if it doesn't already exist."""
@@ -515,14 +527,41 @@ def fast_hash(input_string, length=32):
     return h[:length]
 
 
-# ── Exclude file purge ────────────────────────────────────────────────────────
+# ── Exclude file matching ─────────────────────────────────────────────────────
+
+def is_excluded(filename):
+    """
+    Return True if the filename should be skipped during scanning.
+
+    Matches against the EXCLUDE_FILES list using glob-style wildcards via fnmatch,
+    so patterns like 'videoin_*.mov' or '*.tmp' work as well as exact filenames.
+    Comparison is case-insensitive (filenames coming from Windows/Aspera may have
+    inconsistent case). Always excludes macOS resource fork files (._*).
+    """
+    if filename.startswith("._"):
+        return True
+    fname = filename.lower()
+    return any(fnmatch.fnmatchcase(fname, pattern.lower()) for pattern in exclude_files)
+
+
+def is_folder_excluded(folder_name):
+    """
+    Return True if a subdirectory name matches any pattern in EXCLUDE_FOLDERS.
+    Supports glob wildcards (e.g. ~private-asp*, _archive_*) and matches case-insensitively.
+    Returns False if EXCLUDE_FOLDERS is unset or empty.
+    """
+    if not exclude_folders:
+        return False
+    fname = folder_name.lower()
+    return any(fnmatch.fnmatchcase(fname, pattern.lower()) for pattern in exclude_folders)
+
 
 # Safety net: remove any excluded files that may have slipped through the primary check.
 # Matches by filename (works at any subdirectory depth, unlike a hash-based check).
 def purge_exclude_files(assets):
     to_delete = [
         fileid for fileid, asset in assets.items()
-        if asset.get("name") in exclude_files or asset.get("name", "").startswith("._")
+        if is_excluded(asset.get("name", ""))
     ]
     for fileid in to_delete:
         print(f"Purging excluded file: {assets[fileid].get('name')}")
@@ -536,4 +575,4 @@ def cn4m_note(assets, note):
     print(note)
 
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "cn4m_note", "ffmpeg_extract_audio", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename"]
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "cn4m_note", "ffmpeg_extract_audio", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename"]
