@@ -105,6 +105,21 @@ exit
 
 ---
 
+## Updating `.env` values
+
+Running containers don't automatically pick up changes to `.env`. To reload your settings:
+
+```
+docker compose down
+docker compose up
+```
+
+This is the safest universal command and works for any variable. The reason a simple `docker compose restart` isn't always enough: `REPO_FOLDER` and `QUAR_FOLDER` are interpolated by docker-compose into volume mounts, and volume mounts are locked in at container *creation* — not at start. So changing those paths specifically requires a full down/up cycle.
+
+For variables that are only read by Python at startup (like `GOOGLE_SHEET`, `GOOGLE_CREDS`, `EXCLUDE_FILES`, `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID`, `TIME_BETWEEN_CHECKS`), `docker compose restart` is enough — but down/up never hurts.
+
+---
+
 ## Running cn4m
 
 1. Make sure Docker Desktop is running.
