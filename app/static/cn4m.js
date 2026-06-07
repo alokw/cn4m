@@ -265,11 +265,11 @@ function handle_check_assets_progress(status_task, status_url) {
             const width_cell  = w_fail  ? `<span style="color:#f87171" title="Expected: ${qc_res.w}">${width}</span>`  : width;
             const height_cell = h_fail  ? `<span style="color:#f87171" title="Expected: ${qc_res.h}">${height}</span>` : height;
 
-            // FPS: red if set and asset framerate is outside ±0.1 of the target
-            const fps_fail = qc_config.fps !== null && framerate !== "" &&
-                Math.abs(parseFloat(framerate) - qc_config.fps) > 0.1;
+            // FPS: red if set and asset framerate doesn't match any allowed value (within 0.001 for float precision)
+            const fps_fail = qc_config.fps.length && framerate !== "" &&
+                !qc_config.fps.some(allowed => Math.abs(parseFloat(framerate) - allowed) < 0.001);
             const fps_cell = fps_fail
-                ? `<span style="color:#f87171" title="Expected: ${qc_config.fps}">${framerate}</span>`
+                ? `<span style="color:#f87171" title="Expected: ${qc_config.fps.join(' or ')}">${framerate}</span>`
                 : framerate;
 
             // Row id = fileid (no # prefix) so remove_assets_from_table can find it by getElementById

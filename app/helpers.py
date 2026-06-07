@@ -45,17 +45,20 @@ def parse_qc_codecs():
 
 def parse_qc_fps():
     """
-    Parse QC_FPS env var into a float, or None if not set.
-    e.g. '30' -> 30.0
-    Framerate check uses a ±0.1 tolerance, so 29.97 and 30.088 both pass against 30.
+    Parse QC_FPS env var into a list of floats, or an empty list if not set.
+    e.g. '29.97, 30' -> [29.97, 30.0]
+    Framerate must match one of the listed values exactly (within 0.001 for float precision).
     """
     raw = os.getenv("QC_FPS", "").strip()
     if not raw:
-        return None
-    try:
-        return float(raw)
-    except ValueError:
-        return None
+        return []
+    result = []
+    for entry in raw.split(","):
+        try:
+            result.append(float(entry.strip()))
+        except ValueError:
+            pass
+    return result
 
 
 def parse_qc_resolutions():
@@ -294,7 +297,7 @@ def update_google_sheet(sheet, worksheet, new_rows, qc_codecs=None, qc_resolutio
             )
         format_cell_range(selected_worksheet, row_range, formatting)
 
-        if qc_codecs or qc_resolutions or qc_fps is not None:
+        if qc_codecs or qc_resolutions or qc_fps:
             red_fmt = cellFormat(textFormat=textFormat(foregroundColor=color(0.8, 0.0, 0.0)))
             fail_ranges = []
             for i, row in enumerate(new_rows):
@@ -318,9 +321,10 @@ def update_google_sheet(sheet, worksheet, new_rows, qc_codecs=None, qc_resolutio
                     except (ValueError, TypeError):
                         pass
 
-                if qc_fps is not None and fps_val != "":
+                if qc_fps and fps_val != "":
                     try:
-                        if abs(float(fps_val) - qc_fps) > 0.1:
+                        asset_fps = float(fps_val)
+                        if not any(abs(asset_fps - allowed) < 0.001 for allowed in qc_fps):
                             fail_ranges.append((f'L{sheet_row}', red_fmt))
                     except (ValueError, TypeError):
                         pass
