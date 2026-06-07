@@ -355,7 +355,11 @@ def track_assets(self):
             repo_rows.append(build_google_row(asset_data))
             time.sleep(sleep_time)
 
-        update_google_sheet(sheet, "repository", repo_rows)
+        qc_codecs = parse_qc_codecs()
+        qc_resolutions = parse_qc_resolutions()
+        qc_fps = parse_qc_fps()
+
+        update_google_sheet(sheet, "repository", repo_rows, qc_codecs=qc_codecs, qc_resolutions=qc_resolutions, qc_fps=qc_fps)
         for asset in repo_assets_to_move:
             assets["tracked_repo_assets"][asset] = assets["untracked_repo_assets"].pop(asset, None)
 
@@ -370,7 +374,7 @@ def track_assets(self):
             quar_rows.append(build_google_row(asset_data))
             time.sleep(sleep_time)
 
-        update_google_sheet(sheet, "quarantine", quar_rows)
+        update_google_sheet(sheet, "quarantine", quar_rows, qc_codecs=qc_codecs, qc_resolutions=qc_resolutions, qc_fps=qc_fps)
         for asset in quar_assets_to_move:
             assets["tracked_quar_assets"][asset] = assets["untracked_quar_assets"].pop(asset, None)
 

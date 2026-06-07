@@ -6,7 +6,7 @@
 from flask import Blueprint, jsonify, render_template, url_for, request
 from app.tasks import *
 from app import celery
-from app.helpers import get_ffmpeg_presets
+from app.helpers import get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions, parse_qc_fps
 import os
 
 main = Blueprint("main", __name__)
@@ -33,6 +33,15 @@ def run_extract_audio(id):
 def ffmpeg_presets():
     """Return the list of available ffmpeg presets for the dropdown."""
     return jsonify(get_ffmpeg_presets())
+
+@main.route('/qc_config', methods=['GET'])
+def qc_config():
+    """Return QC rules parsed from .env: allowed codecs and per-screen resolutions."""
+    return jsonify({
+        "codecs": parse_qc_codecs(),
+        "resolutions": parse_qc_resolutions(),
+        "fps": parse_qc_fps()
+    })
 
 @main.route('/transcode_assets', methods=['POST'])
 def run_transcode_assets():

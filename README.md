@@ -7,26 +7,18 @@
 ## What it does
 
 1. **Scan** — Walks a watched folder (your media delivery drop) and extracts metadata from every new file: codec, resolution, framerate, duration, audio format, sample rate, bit depth, file size, and timestamps.
-2. **Review** — Displays all new assets in a sortable table so you can quickly assess whether they conform to spec.
+2. **Review** — Displays all new assets in a sortable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec or resolution) are highlighted red.
 3. **Approve or Quarantine** — Approved files stay in place and are ready to track. Quarantined files are physically moved to a separate folder for manual review.
-4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`.
+4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`. QC failures are highlighted red in the sheet too.
 5. **Extract Audio** — For audio-only files, wraps the audio in a tiny 16×16 HAP-encoded `.mov` so disguise/d3 media servers can play it back as a standard video asset.
 
-<<<<<<< HEAD
 ---
 
 ## Requirements
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows or Mac)
 - A Google Cloud service account with access to the target Google Sheet (see [Configuration](#configuration))
-- A Discord bot with a bot token and a target channel ID (see [Discord notifications](#discord-notifications))
-=======
-to-do
-add conversion buttons and aerender buttons
-update push to google to include flagged assets
-add nickname for hvc1 codec
-Add a way to select all assets in a specific parent folder
->>>>>>> d0c9081d1569aa8e71a407cd52f72894c6516000
+- A Discord webhook URL for the target channel (see [Discord notifications](#discord-notifications))
 
 ---
 
@@ -48,13 +40,15 @@ All settings live in the `.env` file in the project root. Key variables:
 |---|---|
 | `REPO_FOLDER` | Full path to the folder where media deliveries land on your machine (e.g. `M:\wbd26_aspera\project`) |
 | `QUAR_FOLDER` | Full path to the quarantine folder on your machine |
+| `TZ` | Your local timezone (e.g. `America/Los_Angeles`, `America/New_York`, `Europe/London`). Used to stamp correct local times on sheet entries. |
 | `GOOGLE_SHEET` | The ID from your Google Sheet's URL: `https://docs.google.com/spreadsheets/d/`**`<ID>`**`/edit` |
 | `GOOGLE_CREDS` | The full JSON content of your Google service account key file (paste as a single line) |
 | `EXCLUDE_FILES` | Comma-separated list of filenames to ignore during scanning (robocopy logs, sync tool temp files, .DS_Store, etc.) |
 | `TIME_BETWEEN_CHECKS` | Delay (in seconds) between processing each file — keeps Celery progress updates responsive in the UI. Default: `0.001` |
 | `SECRET_KEY` | A random string used for Flask session security. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"` |
-| `DISCORD_BOT_TOKEN` | Bot token from the Discord Developer Portal (see [Discord notifications](#discord-notifications)) |
-| `DISCORD_CHANNEL_ID` | Numeric ID of the Discord channel to post notifications to |
+| `DISCORD_WEBHOOK_URL` | Webhook URL for the Discord channel to post notifications to (see [Discord notifications](#discord-notifications)) |
+| `QC_CODEC` | Comma-separated list of allowed codecs (e.g. `NotchLC, Hap`). Assets with any other codec are flagged red in the UI and sheet. Leave blank to skip codec QC. |
+| `QC_RESOLUTION` | Per-screen resolution rules as `SCREEN@WxH` entries, comma-separated (e.g. `A1@112x336, B1@224x448`). Width and height are checked independently — only the non-matching dimension turns red. Leave blank to skip resolution QC. |
 | `CELERY_BROKER_URL` | Redis URL for the Celery task queue. Default: `redis://redis:6379/0` (no change needed for Docker) |
 | `RESULT_BACKEND` | Redis URL for storing Celery task results. Default: `redis://redis:6379/0` |
 
@@ -71,18 +65,35 @@ The app will automatically create `repository` and `quarantine` worksheets with 
 ### Discord notifications
 
 cn4m sends a message to a Discord channel when:
-- **Files are approved** — posts `## new files approved` followed by a list of each file's folder and name
-- **Files are quarantined** — posts `## new files quarantined` followed by the same
-- **Google Sheet is updated** — posts `## assets updated on google sheet`
+- **Files are approved** — lists each approved asset
+- **Files are quarantined** — lists each quarantined asset
+- **Google Sheet is updated** — confirms the push
 
 To set this up:
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
-2. Under **Bot**, click **Add Bot** and copy the token. This is your `DISCORD_BOT_TOKEN`.
-3. Under **OAuth2 → URL Generator**, check `bot` scope and `Send Messages` permission. Copy the generated URL and open it in a browser to add the bot to your server.
-4. In Discord, right-click the channel you want notifications posted to and select **Copy Channel ID**. (You may need to enable Developer Mode under User Settings → Advanced first.) This is your `DISCORD_CHANNEL_ID`.
-5. Add both values to your `.env` file.
+1. In Discord, open the channel you want notifications posted to.
+2. Go to **Edit Channel → Integrations → Webhooks → New Webhook**.
+3. Give it a name, optionally set an avatar, then click **Copy Webhook URL**. This is your `DISCORD_WEBHOOK_URL`.
+4. Add it to your `.env` file.
 
-Notifications are optional — if `DISCORD_BOT_TOKEN` or `DISCORD_CHANNEL_ID` are missing from `.env`, the app will skip them silently.
+Notifications are optional — if `DISCORD_WEBHOOK_URL` is missing from `.env`, the app will skip them silently.
+
+### QC checks
+
+cn4m can automatically flag assets that don't meet show specs:
+
+**Codec** — set `QC_CODEC` to a comma-separated list of allowed codecs. Any asset whose codec doesn't match turns red in the review table and in the Google Sheet.
+
+```
+QC_CODEC='NotchLC, Hap'
+```
+
+**Resolution** — set `QC_RESOLUTION` to a comma-separated list of `SCREEN@WxH` rules. The screen ID is matched against the parsed screen field in the filename (case-insensitive). Width and height are checked independently — only the dimension(s) that don't match turn red.
+
+```
+QC_RESOLUTION='A1@112x336, B1@224x448, HD@1920x1080'
+```
+
+Both settings are optional. Leave either blank to skip that check entirely. Codec matching is case-insensitive. Screen ID matching is case-insensitive.
 
 ---
 
@@ -93,7 +104,7 @@ Any time you add a package to `requirements.txt`, you need to do a full Docker r
 ```
 docker compose down
 docker compose build --no-cache
-docker compose up
+docker compose up -d
 ```
 
 If you want to test a package quickly without a full rebuild (temporary — you still need to rebuild eventually):
@@ -116,7 +127,7 @@ docker compose up
 
 This is the safest universal command and works for any variable. The reason a simple `docker compose restart` isn't always enough: `REPO_FOLDER` and `QUAR_FOLDER` are interpolated by docker-compose into volume mounts, and volume mounts are locked in at container *creation* — not at start. So changing those paths specifically requires a full down/up cycle.
 
-For variables that are only read by Python at startup (like `GOOGLE_SHEET`, `GOOGLE_CREDS`, `EXCLUDE_FILES`, `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID`, `TIME_BETWEEN_CHECKS`), `docker compose restart` is enough — but down/up never hurts.
+For variables that are only read by Python at startup (like `GOOGLE_SHEET`, `GOOGLE_CREDS`, `EXCLUDE_FILES`, `DISCORD_WEBHOOK_URL`, `QC_CODEC`, `QC_RESOLUTION`, `TZ`, `TIME_BETWEEN_CHECKS`), `docker compose restart` is enough — but down/up never hurts.
 
 ---
 
@@ -151,6 +162,7 @@ Click **START** to scan the repo folder for new files. A progress bar shows each
 **2. Review Assets**
 The table shows each file's folder, name, duration, codec, resolution, audio specs, and size. Click any column header to sort. Use the checkboxes to select files.
 
+- Codec and resolution cells that don't match your QC rules appear in red (hover for the expected value).
 - The musical note button (♬) on each row will extract a HAP audio proxy for that file.
 - Flagged files (invalid or corrupt) appear below the table with a warning note.
 
@@ -160,7 +172,7 @@ With files selected:
 - **Quarantine Selected** — physically moves them to the quarantine folder for manual review.
 
 **4. Track Assets**
-Click **Update Google Sheet** to push all approved (not yet tracked) assets to the configured Google Sheet. Both repo and quarantine assets are pushed. Each asset gets a row with status set to `received`.
+Click **Update Google Sheet** to push all approved (not yet tracked) assets to the configured Google Sheet. Both repo and quarantine assets are pushed. Each asset gets a row with status set to `received`. QC failures are highlighted red in the sheet.
 
 ---
 
