@@ -52,6 +52,24 @@ presets:
   # Wraps audio from any media file into a 16×16 black HAP video.
   # Useful for disguise/d3 media servers that handle video files better than bare audio.
 
+  - name: transcode_hap
+    label: "Transcode Video to HAP"
+    description: "Creates a HAP-encoded .mov from the existing file."
+    inputs:
+      - file: null                        # null means "use the selected asset's file path"
+    outputs:
+      - suffix: "_hap"
+        extension: "mov"
+        options:
+          vcodec: "hap"
+          acodec: "pcm_s16le"
+          format: "mov"
+          vf: "fps={framerate}"
+          ar: 48000
+          ac: 2
+          vn: null
+    global_args: []
+          
   - name: extract_hap_audio
     label: "Extract Audio to 16x16 HAP - Stereo"
     description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
@@ -76,7 +94,7 @@ presets:
       - "-map"
       - "1:a"
 
-  - name: extract_hap_audio
+  - name: extract_hap_audio_left
     label: "Extract Audio to 16x16 HAP - Mono L (VO / Narration)"
     description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
     inputs:
@@ -92,7 +110,7 @@ presets:
           format: "mov"
           vf: "fps={framerate}"
           ar: 48000
-          af: "pan=stereo|c0=c0"
+          af: "pan=stereo|c0=c0|c1=0*c0"
           tune: "stillimage"
           shortest: null
     global_args:
@@ -101,7 +119,7 @@ presets:
       - "-map"
       - "1:a"
 
-  - name: extract_hap_audio
+  - name: extract_hap_audio_right
     label: "Extract Audio to 16x16 HAP - Mono R (Dialogue)"
     description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
     inputs:
@@ -117,7 +135,7 @@ presets:
           format: "mov"
           vf: "fps={framerate}"
           ar: 48000
-          af: "pan=stereo|c1=c0"
+          af: "pan=stereo|c0=0*c0|c1=c0"
           tune: "stillimage"
           shortest: null
     global_args:
