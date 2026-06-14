@@ -1,6 +1,6 @@
 # discord_bot.py
 # Discord notification helper for cn4m.
-# Sends messages to a configured channel via the Discord REST API.
+# Sends messages to a configured channel via a Discord webhook URL.
 # No persistent bot connection needed — each call is a simple HTTP POST.
 
 import os
@@ -11,27 +11,21 @@ from app.helpers import _file_type_emoji
 
 logger = logging.getLogger(__name__)
 
-# Read credentials once at import time
-_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID")
+# Read webhook URL once at import time
+_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 
 
 def _send(message: str) -> bool:
     """
-    POST a single message to the configured Discord channel.
+    POST a single message to the configured Discord webhook.
     Returns True on success, False on any error (never raises).
     """
-    if not _BOT_TOKEN or not _CHANNEL_ID:
-        logger.warning("Discord credentials not set — skipping notification")
+    if not _WEBHOOK_URL:
+        logger.warning("Discord webhook URL not set — skipping notification")
         return False
 
-    url = f"https://discord.com/api/v10/channels/{_CHANNEL_ID}/messages"
-    headers = {
-        "Authorization": f"Bot {_BOT_TOKEN}",
-        "Content-Type": "application/json"
-    }
     try:
-        response = requests.post(url, headers=headers, json={"content": message}, timeout=10)
+        response = requests.post(_WEBHOOK_URL, json={"content": message}, timeout=10)
         response.raise_for_status()
         return True
     except Exception as e:

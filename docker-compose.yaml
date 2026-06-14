@@ -17,6 +17,7 @@ services:
       - FLASK_RUN_HOST=0.0.0.0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
+      - TZ=${TZ}
     #  - CELERY_RESULT_BACKEND=redis://redis:6379/0
     #env_file:
     #  - settings.env
@@ -49,6 +50,7 @@ services:
       - QUAR_FOLDER=${QUAR_FOLDER}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
+      - TZ=${TZ}
     #  - CELERY_RESULT_BACKEND=redis://redis:6379/0
     #command: ["celery", "-A", "app:celery", "worker", "--loglevel=info"]
     command: ["/bin/sh", "-c", "watchmedo auto-restart --recursive --pattern=*.py -- celery -A app:celery worker --loglevel=info --uid=nobody"]

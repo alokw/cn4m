@@ -4,6 +4,19 @@
 // dynamic table rendering, column sorting, and checkbox selection.
 
 
+// ── QC config ─────────────────────────────────────────────────────────────────
+// Fetched once at page load from /qc_config. Used during table rendering to
+// highlight cells that fail codec or resolution checks.
+
+let qc_config = { codecs: [], resolutions: {} };
+
+function load_qc_config() {
+  $.getJSON('/qc_config', function(data) {
+    qc_config = data;
+  });
+}
+
+
 // ── Button handlers ───────────────────────────────────────────────────────────
 // These are wired up to the buttons in index.html via $(function() { ... }) at
 // the bottom of that file.
@@ -237,6 +250,28 @@ function handle_check_assets_progress(status_task, status_url) {
             audio_channels = obj['audio_channels'] || "";
             size = obj['size'] || "";
 
+            // ── QC checks ─────────────────────────────────────────────────────
+            // Codec: red if QC_CODEC is configured and this asset's codec isn't in the list
+            const codec_fail = qc_config.codecs.length && video_codec &&
+                !qc_config.codecs.includes(video_codec.toLowerCase());
+            const codec_cell = codec_fail
+                ? `<span style="color:#f87171" title="Expected: ${qc_config.codecs.join(', ')}">${video_codec}</span>`
+                : video_codec;
+
+            // Resolution: red on the dimension(s) that don't match for this screen ID
+            const qc_res = qc_config.resolutions[screen.toLowerCase()];
+            const w_fail = qc_res && width !== "" && parseInt(width) !== qc_res.w;
+            const h_fail = qc_res && height !== "" && parseInt(height) !== qc_res.h;
+            const width_cell  = w_fail  ? `<span style="color:#f87171" title="Expected: ${qc_res.w}">${width}</span>`  : width;
+            const height_cell = h_fail  ? `<span style="color:#f87171" title="Expected: ${qc_res.h}">${height}</span>` : height;
+
+            // FPS: red if set and asset framerate doesn't match any allowed value (within 0.001 for float precision)
+            const fps_fail = qc_config.fps.length && framerate !== "" &&
+                !qc_config.fps.some(allowed => Math.abs(parseFloat(framerate) - allowed) < 0.001);
+            const fps_cell = fps_fail
+                ? `<span style="color:#f87171" title="Expected: ${qc_config.fps.join(' or ')}">${framerate}</span>`
+                : framerate;
+
             // Row id = fileid (no # prefix) so remove_assets_from_table can find it by getElementById
             asset_table += `
                 <tr id="${fileid}" class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
@@ -247,10 +282,10 @@ function handle_check_assets_progress(status_task, status_url) {
                     <td class="pr-4">${version_cell}</td>
                     <td class="pr-4">${extension}</td>
                     <td class="pr-4">${duration}</td>
-                    <td class="pr-4">${video_codec}</td>
-                    <td class="pr-4">${width}</td>
-                    <td class="pr-4">${height}</td>
-                    <td class="pr-4">${framerate}</td>
+                    <td class="pr-4">${codec_cell}</td>
+                    <td class="pr-4">${width_cell}</td>
+                    <td class="pr-4">${height_cell}</td>
+                    <td class="pr-4">${fps_cell}</td>
                     <td class="pr-4">${audio}</td>
                     <td class="pr-4">${audio_rate}</td>
                     <td class="pr-4">${audio_bits}</td>
@@ -394,6 +429,25 @@ function select_all_audio() {
     var checkbox = rows[i].querySelector("input[name='review_checkbox']");
     if (checkbox && audioExts.includes(ext)) {
       checkbox.checked = true;
+    }
+  }
+  document.querySelector('th input[type="checkbox"]').checked = false;
+}
+
+function deselect_all_audio() {
+  var audioExts = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
+  var table = document.getElementById("sortableTable");
+  if (!table) return;
+  var headers = table.querySelectorAll("thead th");
+  var extColIndex = Array.from(headers).findIndex(h => h.textContent.trim() === "Ext");
+  if (extColIndex < 0) return;
+
+  var rows = table.querySelectorAll("tbody tr");
+  for (var i = 0; i < rows.length; i++) {
+    var ext = (rows[i].children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
+    var checkbox = rows[i].querySelector("input[name='review_checkbox']");
+    if (checkbox && audioExts.includes(ext)) {
+      checkbox.checked = false;
     }
   }
   document.querySelector('th input[type="checkbox"]').checked = false;

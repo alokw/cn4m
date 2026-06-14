@@ -32,6 +32,55 @@ exclude_files = os.getenv("EXCLUDE_FILES").split(", ")  # Filenames to skip duri
 _exclude_folders_raw = os.getenv("EXCLUDE_FOLDERS", "")
 exclude_folders = [p.strip() for p in _exclude_folders_raw.split(",") if p.strip()]
 
+
+def parse_qc_codecs():
+    """
+    Parse QC_CODEC env var into a list of lowercase codec names.
+    e.g. 'NotchLC, Hap' -> ['notchlc', 'hap']
+    Returns an empty list if not set.
+    """
+    raw = os.getenv("QC_CODEC", "")
+    return [c.strip().lower() for c in raw.split(",") if c.strip()]
+
+
+def parse_qc_fps():
+    """
+    Parse QC_FPS env var into a list of floats, or an empty list if not set.
+    e.g. '29.97, 30' -> [29.97, 30.0]
+    Framerate must match one of the listed values exactly (within 0.001 for float precision).
+    """
+    raw = os.getenv("QC_FPS", "").strip()
+    if not raw:
+        return []
+    result = []
+    for entry in raw.split(","):
+        try:
+            result.append(float(entry.strip()))
+        except ValueError:
+            pass
+    return result
+
+
+def parse_qc_resolutions():
+    """
+    Parse QC_RESOLUTION env var into a dict keyed by lowercase screen ID.
+    e.g. 'A1@112x336, B1@224x448' -> {'a1': {'w': 112, 'h': 336}, 'b1': {'w': 224, 'h': 448}}
+    Returns an empty dict if not set or malformed.
+    """
+    raw = os.getenv("QC_RESOLUTION", "")
+    result = {}
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if "@" not in entry or "x" not in entry:
+            continue
+        screen, dims = entry.split("@", 1)
+        parts = dims.split("x", 1)
+        try:
+            result[screen.strip().lower()] = {"w": int(parts[0].strip()), "h": int(parts[1].strip())}
+        except (ValueError, IndexError):
+            pass
+    return result
+
 # Docker container paths (the host folders are mounted here via docker-compose volumes)
 cn4m_folder = "/cn4m_assets"
 cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
@@ -204,14 +253,14 @@ def build_google_row(asset):
     row.append(asset["parent"])
     basename = asset.get("basename") or asset["name"]
     ext = asset.get("extension", "")
-    row.append(_file_type_emoji(ext) + basename)
+    row.append(basename)
     version = asset.get("version", "")
     if version:
         prefix = "☝️ " if asset.get("is_version_up") else "🆕 "
         row.append(prefix + version)
     else:
         row.append("")
-    row.append("")                                                            # NOTES — left blank for manual entry
+    row.append(_file_type_emoji(ext).strip())                                # NOTES — file type emoji (🎵 🖼️ 🎬)
     row.append(asset["duration"]) if "duration" in asset else row.append("")
     row.append(asset.get("screen", ""))
     row.append(ext)
@@ -230,10 +279,12 @@ def build_google_row(asset):
     row.append(asset["folder"]) if "folder" in asset else row.append("")
     return row
 
-def update_google_sheet(sheet, worksheet, new_rows):
+def update_google_sheet(sheet, worksheet, new_rows, qc_codecs=None, qc_resolutions=None, qc_fps=None):
     """
     Insert new rows at the top of a worksheet (below the header row).
     Formats inserted rows as plain black-on-white left-aligned text.
+    If qc_codecs / qc_resolutions / qc_fps are provided, cells that fail QC get red text.
+    Column layout (0-based): SCREEN=6, CODEC=8, WIDTH=9, HEIGHT=10, FPS=11 → G, I, J, K, L
     """
     selected_worksheet = sheet.worksheet(worksheet)
     selected_worksheet.insert_rows(new_rows, row=2, value_input_option='RAW', inherit_from_before=False)
@@ -245,6 +296,41 @@ def update_google_sheet(sheet, worksheet, new_rows):
             horizontalAlignment='LEFT'
             )
         format_cell_range(selected_worksheet, row_range, formatting)
+
+        if qc_codecs or qc_resolutions or qc_fps:
+            red_fmt = cellFormat(textFormat=textFormat(foregroundColor=color(0.8, 0.0, 0.0)))
+            fail_ranges = []
+            for i, row in enumerate(new_rows):
+                sheet_row = i + 2  # row 1 is the header
+                codec  = row[8]  if len(row) > 8  else ""
+                screen = (row[6] if len(row) > 6  else "").lower()
+                w_val  = row[9]  if len(row) > 9  else ""
+                h_val  = row[10] if len(row) > 10 else ""
+                fps_val = row[11] if len(row) > 11 else ""
+
+                if qc_codecs and codec and codec.lower() not in qc_codecs:
+                    fail_ranges.append((f'I{sheet_row}', red_fmt))
+
+                if qc_resolutions and screen in qc_resolutions:
+                    qc_res = qc_resolutions[screen]
+                    try:
+                        if w_val != "" and int(w_val) != qc_res['w']:
+                            fail_ranges.append((f'J{sheet_row}', red_fmt))
+                        if h_val != "" and int(h_val) != qc_res['h']:
+                            fail_ranges.append((f'K{sheet_row}', red_fmt))
+                    except (ValueError, TypeError):
+                        pass
+
+                if qc_fps and fps_val != "":
+                    try:
+                        asset_fps = float(fps_val)
+                        if not any(abs(asset_fps - allowed) < 0.001 for allowed in qc_fps):
+                            fail_ranges.append((f'L{sheet_row}', red_fmt))
+                    except (ValueError, TypeError):
+                        pass
+
+            if fail_ranges:
+                format_cell_ranges(selected_worksheet, fail_ranges)
 
 def setup_google_sheet(sheet):
     """
@@ -472,17 +558,28 @@ def check_asset(assets, file, filename):
 # ── Filename parsing ──────────────────────────────────────────────────────────
 
 # Matches asset filenames in the convention: {id}_{desc}_{screen}_{vVERSION}.{ext}
-#   id      — starts AND ends with a digit; may contain _ . - between digits (e.g. 1000, 1000-1005, 1000.1, 1000_100)
+#   id      — starts and ends with a letter or digit; may contain _ . - between (e.g. 1000, shrm26, 1000-1005)
 #   desc    — any chars; may contain underscores (greedy match)
 #   screen  — any chars EXCEPT underscores (this is the boundary that makes parsing unambiguous)
-#   version — starts with lowercase 'v' followed by at least one digit, then any chars up to the file extension
+#   version — starts with 'v' or 'V' followed by at least one digit, then any chars up to the file extension
 #             (the required digit prevents a screen tag that happens to start with 'v' from being misread as a version)
 ASSET_FILENAME_PATTERN = re.compile(
-    r'^(?P<id>[0-9][0-9_.\-]*[0-9]|[0-9])'
+    r'^(?P<id>[A-Za-z0-9][A-Za-z0-9_.\-]*[A-Za-z0-9]|[A-Za-z0-9])'
     r'_(?P<desc>.+)'
     r'_(?P<screen>[^_]+)'
     r'_(?P<version>v[0-9][^.]*)'
-    r'\.[^.]+$'
+    r'\.[^.]+$',
+    re.IGNORECASE
+)
+
+# Fallback for filenames with no screen designation: {id}_{desc}_{vVERSION}.{ext}
+# Only tried when the full pattern above fails.
+ASSET_FILENAME_PATTERN_NO_SCREEN = re.compile(
+    r'^(?P<id>[A-Za-z0-9][A-Za-z0-9_.\-]*[A-Za-z0-9]|[A-Za-z0-9])'
+    r'_(?P<desc>.+)'
+    r'_(?P<version>v[0-9][^.]*)'
+    r'\.[^.]+$',
+    re.IGNORECASE
 )
 
 def parse_asset_filename(filename):
@@ -494,10 +591,17 @@ def parse_asset_filename(filename):
       version   = 'v01_nlc'
       basename  = '1000_prestige_segment_trans_ab'  (everything except version and extension)
 
-    Returns a dict with all five keys. If the filename doesn't match the
-    expected convention, the four parsed fields default to empty strings,
-    but basename falls back to the full filename minus the extension
-    (so it's always usable as a display label).
+    Also handles screenless filenames like '4050_PESGVideo_V0.mov':
+      id        = '4050'
+      desc      = 'PESGVideo'
+      screen    = ''
+      version   = 'v0'
+      basename  = '4050_PESGVideo'
+
+    Returns a dict with all five keys. If the filename doesn't match either
+    convention, the four parsed fields default to empty strings, but basename
+    falls back to the full filename minus the extension (so it's always usable
+    as a display label).
     """
     m = ASSET_FILENAME_PATTERN.match(filename)
     if m:
@@ -508,8 +612,19 @@ def parse_asset_filename(filename):
             "id": asset_id,
             "desc": desc,
             "screen": screen,
-            "version": m.group("version"),
+            "version": m.group("version").lower(),
             "basename": f"{asset_id}_{desc}_{screen}",
+        }
+    m = ASSET_FILENAME_PATTERN_NO_SCREEN.match(filename)
+    if m:
+        asset_id = m.group("id")
+        desc = m.group("desc")
+        return {
+            "id": asset_id,
+            "desc": desc,
+            "screen": "",
+            "version": m.group("version").lower(),
+            "basename": f"{asset_id}_{desc}",
         }
     # Non-conforming filename: fall back to filename-without-extension for basename
     return {"id": "", "desc": "", "screen": "", "version": "", "basename": Path(filename).stem}
@@ -575,4 +690,4 @@ def cn4m_note(assets, note):
     print(note)
 
 
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "cn4m_note", "ffmpeg_extract_audio", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename"]
+__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "cn4m_note", "ffmpeg_extract_audio", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps"]

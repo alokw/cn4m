@@ -182,3 +182,25 @@ presets:
           ac: 2
           vn: null
     global_args: []
+
+
+
+  # ── Extract WAV Audio ─────────────────────────────────────────────────────────
+  # Strips the audio track(s) into a standalone WAV file.
+
+  - name: convert_to_hap
+    label: "Convert to HAP"
+    description: "Exports a HAP file."
+    inputs:
+      - file: null
+    outputs:
+      - suffix: "_hap"
+        extension: "mov"
+        options:
+          vcodec: "hap"
+          acodec: "pcm_s16le"
+          format: "hap"
+          ar: 48000
+          vf: "fps={framerate}"
+          ac: 2
+    global_args: []

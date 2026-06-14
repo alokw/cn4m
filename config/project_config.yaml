@@ -12,4 +12,5 @@
 # Common values: 23.976, 24, 25, 29.97, 30, 59.94, 60
 # Fractional rates are automatically converted to ffmpeg's rational form
 # (e.g. 29.97 → 30000/1001).
-framerate: 29.97
+# framerate: 29.97
+framerate: 30
