@@ -246,7 +246,7 @@ def build_google_row(asset):
     """
     Convert an asset dict into a flat list of values matching the sheet column order:
     STATUS | PARENT | NAME | VERSION | NOTES | DURATION | SCREEN | EXT | CODEC |
-    WIDTH | HEIGHT | FPS | AUDIO | RATE | BITS | CH | SIZE | CREATED | MODIFIED | PROCESSED | FOLDER
+    WIDTH | HEIGHT | FPS | AUDIO | RATE | BITS | CH | SIZE | CREATED | MODIFIED | PROCESSED | FOLDER | FILENAME
     """
     row = []
     row.append("received")                                                    # STATUS — default on arrival
@@ -277,6 +277,7 @@ def build_google_row(asset):
     row.append(asset["modified"]) if "modified" in asset else row.append("")
     row.append(asset["processed"]) if "processed" in asset else row.append("")
     row.append(asset["folder"]) if "folder" in asset else row.append("")
+    row.append(asset.get("name", ""))                                         # FILENAME — full filename including extension
     return row
 
 def update_google_sheet(sheet, worksheet, new_rows, qc_codecs=None, qc_resolutions=None, qc_fps=None):
@@ -338,7 +339,7 @@ def setup_google_sheet(sheet):
     headers, formatting, frozen header row, column widths, and a STATUS dropdown.
     Safe to call repeatedly — only creates sheets that are missing.
     """
-    headers = [ "STATUS", "PARENT", "NAME", "VERSION", "NOTES", "DURATION", "SCREEN", "EXT", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER" ]
+    headers = [ "STATUS", "PARENT", "NAME", "VERSION", "NOTES", "DURATION", "SCREEN", "EXT", "CODEC", "WIDTH", "HEIGHT", "FPS", "AUDIO", "RATE", "BITS", "CH", "SIZE", "CREATED", "MODIFIED", "PROCESSED", "FOLDER", "FILENAME" ]
 
     worksheet_objs = sheet.worksheets()
     worksheets_list = [w.title for w in worksheet_objs]
@@ -349,7 +350,7 @@ def setup_google_sheet(sheet):
             current_worksheet = sheet.worksheet(w)
         else:
             # Sheet doesn't exist — create it and apply all formatting
-            current_worksheet = sheet.add_worksheet(title=w, rows=100, cols=21)
+            current_worksheet = sheet.add_worksheet(title=w, rows=100, cols=22)
             current_worksheet.update(range_name='1:1', values=[headers])
             current_worksheet.format('1:1', {
                 "backgroundColor": { "red": 0.0, "green": 0.0, "blue": 0.0 },
@@ -363,14 +364,14 @@ def setup_google_sheet(sheet):
                 BooleanCondition('ONE_OF_LIST', ['received', 'ingested', 'programmed', 'waiting', 'problem']),
                 showCustomUi=True
             )
-            format_cell_range(current_worksheet, 'A:U', general_formatting)
+            format_cell_range(current_worksheet, 'A:V', general_formatting)
             set_frozen(current_worksheet, rows=1)
             set_column_widths(current_worksheet, [
                 ('A', 100), ('B', 175), ('C', 400), ('D', 100),
                 ('E', 175), ('F', 90), ('G', 90), ('H', 75), ('I', 90),
                 ('J', 65), ('K', 65), ('L', 55), ('M', 55), ('N', 55),
                 ('O', 55), ('P', 55), ('Q', 75), ('R', 135), ('S', 135),
-                ('T', 135), ('U', 265)
+                ('T', 135), ('U', 265), ('V', 400)
             ])
             set_data_validation_for_cell_range(current_worksheet, 'A2:A2000', validation_rule)
 
