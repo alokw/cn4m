@@ -104,14 +104,6 @@ function update_progress(status_task, status_url) {
   const basePath = parts[0];
 
   switch(basePath) {
-    case "extract_audio":
-      msg_destination = "#review_asset_progress"
-      msg_pending = "Attempting to Extract Audio"
-      msg_progress = "Attempting to Extract Audio in Progress"
-      msg_complete = "Attempt to Extract Audio Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
-      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
-      break;
-
     case "approve_assets":
       msg_destination = "#review_asset_progress"
       msg_pending = "Starting Approval"

@@ -11,40 +11,19 @@ import time
 import json
 
 # ── Config ────────────────────────────────────────────────────────────────────
-exclude_files = os.getenv("EXCLUDE_FILES").split(", ")
-sleep_time = float(os.getenv("TIME_BETWEEN_CHECKS"))  # small delay between file ops for responsive progress updates
-
-# Docker container paths (host folders are mounted here via docker-compose)
-cn4m_folder = "/cn4m_assets"
-cn4m_quarantine = os.path.join(cn4m_folder, "quarantine")
-cn4m_repo = os.path.join(cn4m_folder, "repo")
+# Shared config values (env vars + container paths) live in helpers.py.
+from app.helpers import sleep_time, cn4m_folder, cn4m_repo, cn4m_quarantine
 
 # Print config at worker startup so it's easy to confirm settings in logs
-print("settings.env google_sheet = " + str(os.getenv("GOOGLE_SHEET")))
-print("settings.env exclude_files = " + str(exclude_files))
-print("settings.env sleep_time = " + str(os.getenv("TIME_BETWEEN_CHECKS")))
-print("docker project_folder = " + str(cn4m_folder))
-print("quarantine folder = " + str(cn4m_quarantine))
+print(".env google_sheet = " + str(os.getenv("GOOGLE_SHEET")))
+print(".env exclude_files = " + str(os.getenv("EXCLUDE_FILES")))
+print(".env sleep_time = " + str(os.getenv("TIME_BETWEEN_CHECKS")))
 print("repo folder = " + str(cn4m_repo))
+print("quarantine folder = " + str(cn4m_quarantine))
 
-
-# ── Audio extraction ──────────────────────────────────────────────────────────
-
-@celery.task(bind=True)
-def extract_audio(self, asset):
-    """
-    Wraps a media file's audio track in a tiny HAP-encoded .mov for disguise/d3 playback.
-    After completion, re-runs check_assets so the new file appears in the UI.
-    """
-    print(asset)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
-    folder = assets["unreviewed_assets"][asset]["folder"]
-    filename = assets["unreviewed_assets"][asset]["name"]
-    src = os.path.join(folder, filename)
-    result = ffmpeg_extract_audio(src)
-    self.update_state(state='PROGRESS', meta={'current': 1, 'total': 1, 'status': result})
-    check_assets.delay()  # re-scan so the new _hapaudio.mov shows up
-    return {"current": 1, "total": 1, "status": "COMPLETE", "result": result}
+# Create repo/ and quarantine/ subdirectories inside WORKSPACE_FOLDER if they
+# don't already exist, so a fresh workspace is usable without manual setup.
+ensure_workspace_folders()
 
 
 # ── Transcode assets ──────────────────────────────────────────────────────────
@@ -408,4 +387,4 @@ def clear_flags(self):
 
 
 # Explicitly define what gets imported when using `from app.tasks import *`
-__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "extract_audio", "transcode_assets", "quarantine_and_transcode"]
+__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "transcode_assets", "quarantine_and_transcode"]

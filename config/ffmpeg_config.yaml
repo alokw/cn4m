@@ -185,8 +185,8 @@ presets:
 
 
 
-  # ── Extract WAV Audio ─────────────────────────────────────────────────────────
-  # Strips the audio track(s) into a standalone WAV file.
+  # ── Convert to HAP ────────────────────────────────────────────────────────────
+  # Re-encodes the file as HAP with stereo PCM audio.
 
   - name: convert_to_hap
     label: "Convert to HAP"

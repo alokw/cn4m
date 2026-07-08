@@ -22,13 +22,6 @@ def index():
 
 # ── Asset actions ─────────────────────────────────────────────────────────────
 
-@main.route('/extract_audio/<id>', methods=['POST'])
-def run_extract_audio(id):
-    """Kick off audio extraction for a single asset by its fileid."""
-    task = extract_audio.delay(id)
-    print(id)
-    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
-
 @main.route('/ffmpeg_presets', methods=['GET'])
 def ffmpeg_presets():
     """Return the list of available ffmpeg presets for the dropdown."""

@@ -3,7 +3,6 @@
 # Covers: media metadata extraction, Google Sheets integration,
 # file operations, JSON state management, and hashing.
 
-from os.path import isfile
 from pathlib import Path
 from time import strftime, localtime
 from datetime import datetime
@@ -12,7 +11,6 @@ from gspread_formatting import *
 import os
 import re
 import json
-import time
 import fnmatch
 import xxhash
 import gspread
@@ -89,48 +87,7 @@ ffmpeg_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspat
 project_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'project_config.yaml')
 
 
-# ── Audio extraction ──────────────────────────────────────────────────────────
-
-def ffmpeg_extract_audio(in_filename):
-    """
-    Creates a HAP-encoded proxy .mov from a media file's audio track.
-
-    disguise/d3 media servers handle video files better than bare audio files.
-    This wraps the audio in a 16x16 black HAP video so d3 can play it back
-    as a standard video asset. Output is saved alongside the original file
-    as <original_name>_hapaudio.mov.
-    """
-    p = Path(in_filename)
-    out_filename = str(p.parent / (p.stem + "_hapaudio.mov"))
-
-    try:
-        # .run() returns (stdout, stderr) as a tuple
-        stdout, stderr = (
-            ffmpeg
-            .input('color=c=black:s=16x16', f='lavfi')   # input 0: synthetic black 16x16 video
-            .input(in_filename)                           # input 1: the real media file (audio source)
-            .output(
-                out_filename,
-                vcodec='hap',
-                acodec='pcm_s16le',
-                format='mov',
-                vf='fps=30',
-                ar=48000,
-                tune='stillimage',
-                shortest=None
-            )
-            .global_args(
-                '-map', '0:v',    # take video track from the synthetic black input
-                '-map', '1:a'     # take audio track from the real media file
-            )
-            .run(overwrite_output=True, capture_stdout=True, capture_stderr=True)
-        )
-        print(stderr)
-    except Exception as e:
-        print(f"Error processing {in_filename}: {e}")
-
-    return in_filename
-
+# ── FFmpeg presets ────────────────────────────────────────────────────────────
 
 def load_ffmpeg_config():
     """Load and return the ffmpeg config YAML as a dict."""
@@ -419,6 +376,19 @@ def get_folder(folder):
     return folder
 
 
+def ensure_workspace_folders():
+    """
+    Make sure the 'repo' and 'quarantine' subdirectories exist inside
+    WORKSPACE_FOLDER (mounted at /cn4m_assets in the container). Called at
+    worker startup so the app is usable on a fresh workspace without the user
+    needing to manually create the subdirs.
+    """
+    for path in (cn4m_repo, cn4m_quarantine):
+        if not os.path.exists(path):
+            os.makedirs(path, exist_ok=True)
+            print(f"Created workspace folder: {path}")
+
+
 # ── JSON state file ───────────────────────────────────────────────────────────
 
 def get_json_file(file):
@@ -448,7 +418,6 @@ def get_json_file(file):
 
 def write_json_file(json_data, json_filename):
     """Serialize json_data and write it to assets.json in the repo folder."""
-    cn4m_repo = os.path.join(cn4m_folder, "repo")
     json_file = Path(os.path.join(cn4m_repo, json_filename))
     with open(json_file, 'w') as f:
         json.dump(json_data, f, indent=4)
@@ -685,10 +654,4 @@ def purge_exclude_files(assets):
     return assets
 
 
-# ── Misc ──────────────────────────────────────────────────────────────────────
-
-def cn4m_note(assets, note):
-    print(note)
-
-
-__all__ = ["get_folder", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "cn4m_note", "ffmpeg_extract_audio", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps"]
+__all__ = ["get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps"]

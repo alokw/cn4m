@@ -1,16 +1,12 @@
-# Use an official Python runtime as a parent image
+# Shared image for the Flask web server and the Celery worker
+# (docker-compose overrides the command per service).
 FROM python:3.9-slim
 
-#WORKDIR /ffmpeg
-#RUN make && make install
-
-# Set the working directory in the container
 WORKDIR /app
 
-# Copy only the necessary files first (for better caching)
+# Copy only requirements first so dependency installs are cached across builds
 COPY requirements.txt .
 
-# Install any needed packages specified in requirements.txt
 RUN apt-get -y update && apt-get install -y --no-install-recommends ffmpeg
 RUN pip install --trusted-host pypi.python.org -r requirements.txt
 
@@ -22,11 +18,3 @@ EXPOSE 5000
 
 # Run Flask when the container starts
 CMD ["python", "run.py"]
-
-#ENV FLASK_APP=app.app
-#ENV FLASK_ENV=development
-
-# Default command to run Flask (can be overridden in docker-compose)
-# CMD ["flask", "--debug", "--app app", "run", "--host=0.0.0.0"]
-# CMD ["flask", "run", "--host=0.0.0.0", "--port=5000", "--debug"]
-# CMD ["python", "app.py"]

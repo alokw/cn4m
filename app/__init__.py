@@ -30,6 +30,7 @@ def make_celery(app):
 def create_app():
     """Create and configure the Flask app, then initialize Celery."""
     app = Flask(__name__)
+    app.secret_key = os.getenv("SECRET_KEY")
     app.config["CELERY_BROKER_URL"] = os.getenv("CELERY_BROKER_URL")
     app.config["result_backend"] = os.getenv("RESULT_BACKEND")
 
