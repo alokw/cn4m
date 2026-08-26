@@ -287,6 +287,24 @@ def check_assets(self):
         bn = asset.get("basename")
         asset["is_version_up"] = bool(bn) and bn.casefold() in existing_basenames
 
+    # The set above only knows assets from previous scans, so a basename arriving
+    # more than once within this same batch (e.g. v02 and v03 both land before
+    # anyone reviews them) wouldn't be caught. Group the batch by basename and
+    # mark all but the lowest version as version-ups too.
+    # Assets with no parsed version sit this out: their basename is just the
+    # filename stem, so two unrelated non-conforming files could collide.
+    same_scan_groups = {}
+    for asset in unreviewed_assets.values():
+        bn = asset.get("basename")
+        if bn and asset.get("version"):
+            same_scan_groups.setdefault(bn.casefold(), []).append(asset)
+
+    for group in same_scan_groups.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda a: version_sort_key(a.get("version", "")))
+        for asset in group[1:]:  # lowest version stays 🆕; everything above it is a version-up
+            asset["is_version_up"] = True
     # Sort valid new assets alphabetically by dumbpath (case-insensitive parent.filename)
     unreviewed_assets = dict(
         sorted(unreviewed_assets.items(), key=lambda item: item[1]["dumbpath"])

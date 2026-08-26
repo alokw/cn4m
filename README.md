@@ -60,7 +60,7 @@ All settings live in the `.env` file in the project root (copy `.env.example` to
 | `EXCLUDE_FILES` | | Comma-separated filenames to ignore during scanning. Supports glob wildcards (`videoin_*.mov`, `*.tmp`); case-insensitive. |
 | `EXCLUDE_FOLDERS` | | Comma-separated folder names to skip entirely during scanning (not even descended into). Same wildcard matching as `EXCLUDE_FILES`. |
 | `QC_CODEC` | | Comma-separated allowed codecs (e.g. `NotchLC, Hap`). Anything else is flagged red. Omit to skip codec QC. |
-| `QC_RESOLUTION` | | Per-screen resolution rules as `SCREEN@WxH` entries (e.g. `A1@112x336, HD@1920x1080`). Omit to skip resolution QC. |
+| `QC_RESOLUTION` | | Resolution rules, comma-separated. `SCREEN@WxH` applies to files on that screen; a bare `WxH` applies to every file, including files with no screen field (e.g. `A1@112x336, 1920x1080`). A file passes if it matches any applicable rule. Omit to skip resolution QC. |
 | `QC_FPS` | | Comma-separated allowed framerates (e.g. `29.97, 30`). Omit to skip framerate QC. |
 | `TIME_BETWEEN_CHECKS` | | Delay (seconds) between processing each file — keeps progress updates responsive in the UI. Default: `0.001` |
 | `SECRET_KEY` | | Random string for Flask session security. Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
@@ -110,12 +110,13 @@ cn4m can automatically flag assets that don't meet show specs. All three checks 
 QC_CODEC='NotchLC, Hap'
 ```
 
-**Resolution** — per-screen rules as `SCREEN@WxH`. The screen ID is matched against the screen field parsed from the filename. Width and height are checked independently — only the dimension(s) that don't match turn red:
+**Resolution** — two rule forms, mixable in one list. `SCREEN@WxH` applies only to files whose screen field (parsed from the filename) matches that screen ID. A bare `WxH` is a global rule that applies to every file, including files with no screen field at all — so a list of only bare entries QCs the whole delivery against a set of allowed sizes:
 
 ```
-QC_RESOLUTION='A1@112x336, B1@224x448, HD@1920x1080'
+QC_RESOLUTION='A1@112x336, B1@224x448, 1920x1080, 3840x2160'
 ```
 
+A file is checked against the global rules plus its own screen rule, and passes if it matches any one of them outright. If none match, the closest rule decides which dimension(s) turn red — a 1920×1920 file checked against `1920x1080` flags only the height.
 **Framerate** — flag any asset whose framerate doesn't match one of the allowed values:
 
 ```
@@ -124,7 +125,7 @@ QC_FPS='29.97, 30'
 
 ### Filename convention
 
-cn4m parses structured fields out of filenames following the convention `{id}_{desc}_{screen}_{version}.{ext}`, e.g. `1000_prestige_segment_ab_v01.mov` → id `1000`, description `prestige_segment`, screen `ab`, version `v01`. The screen field is what `QC_RESOLUTION` rules match against, and the version field powers version-up detection (a new file whose base name matches an already-tracked asset is marked as a version-up ☝️ rather than a new asset 🆕). Files that don't match the convention are still processed — they just won't have screen/version metadata.
+cn4m parses structured fields out of filenames following the convention `{id}_{desc}_{screen}_{version}.{ext}`, e.g. `1000_prestige_segment_ab_v01.mov` → id `1000`, description `prestige_segment`, screen `ab`, version `v01`. The screen field is what `SCREEN@WxH` resolution rules match against, and the version field powers version-up detection (a new file whose base name — id, description **and** screen, everything but the version — matches an already-tracked asset is marked as a version-up ☝️ rather than a new asset 🆕, so the same content delivered for two different screens counts as two new assets rather than a version of one; when several versions of the same base name turn up in a single scan, the lowest is the new asset and the rest are version-ups). The NAME column shows just the id and description; the screen lives in its own SCREEN column. Files that don't match the convention are still processed — they just won't have screen/version metadata, so only the screen-less `WxH` resolution rules apply to them.
 
 ### Transcode presets
 
