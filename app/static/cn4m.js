@@ -8,12 +8,41 @@
 // Fetched once at page load from /qc_config. Used during table rendering to
 // highlight cells that fail codec or resolution checks.
 
-let qc_config = { codecs: [], resolutions: {} };
+let qc_config = { codecs: [], resolutions: {}, fps: [] };
 
 function load_qc_config() {
   $.getJSON('/qc_config', function(data) {
     qc_config = data;
   });
+}
+
+// Resolution rules that apply to a file: the global (untagged) rules from
+// QC_RESOLUTION plus this screen's rule, if one is configured.
+function qc_resolution_rules(screen) {
+  const res = qc_config.resolutions;
+  if (!res) return [];
+  const rules = (res.global || []).slice();
+  const screen_rule = (res.screens || {})[(screen || "").trim().toLowerCase()];
+  if (screen_rule) rules.push(screen_rule);
+  return rules;
+}
+
+// Passing any one rule outright passes the file; otherwise the closest rule
+// decides which dimension(s) get flagged, so a 1920x1920 file checked against
+// 1920x1080 flags only the height.
+function qc_resolution_fails(rules, width, height) {
+  const w = width === "" || width === null || width === undefined ? null : parseInt(width);
+  const h = height === "" || height === null || height === undefined ? null : parseInt(height);
+  if (!rules.length || (w === null && h === null) || isNaN(w) || isNaN(h)) return { w: false, h: false };
+
+  let best = { w: true, h: true };
+  for (const rule of rules) {
+    const w_fail = w !== null && w !== rule.w;
+    const h_fail = h !== null && h !== rule.h;
+    if (!w_fail && !h_fail) return { w: false, h: false };
+    if (w_fail + h_fail < best.w + best.h) best = { w: w_fail, h: h_fail };
+  }
+  return best;
 }
 
 
@@ -213,7 +242,7 @@ function handle_check_assets_progress(status_task, status_url) {
         for (const [key, value] of Object.entries(data['result']['assets'])) {
             obj = data['result']['assets'][key];
             fileid = key;
-            name = obj['basename'] || obj['name'] || "";  // basename excludes version + extension; falls back to full name
+            name = obj['display_name'] || obj['basename'] || obj['name'] || "";  // display_name excludes screen, version + extension; falls back for pre-display_name entries
             version = obj['version'] || "";
             extension = obj['extension'] || "";
             // Prepend an icon next to the version:
@@ -250,12 +279,13 @@ function handle_check_assets_progress(status_task, status_url) {
                 ? `<span style="color:#f87171" title="Expected: ${qc_config.codecs.join(', ')}">${video_codec}</span>`
                 : video_codec;
 
-            // Resolution: red on the dimension(s) that don't match for this screen ID
-            const qc_res = qc_config.resolutions[screen.toLowerCase()];
-            const w_fail = qc_res && width !== "" && parseInt(width) !== qc_res.w;
-            const h_fail = qc_res && height !== "" && parseInt(height) !== qc_res.h;
-            const width_cell  = w_fail  ? `<span style="color:#f87171" title="Expected: ${qc_res.w}">${width}</span>`  : width;
-            const height_cell = h_fail  ? `<span style="color:#f87171" title="Expected: ${qc_res.h}">${height}</span>` : height;
+            // Resolution: red on the dimension(s) that match none of the applicable rules
+            const qc_rules = qc_resolution_rules(screen);
+            const res_fail = qc_resolution_fails(qc_rules, width, height);
+            const expected_w = [...new Set(qc_rules.map(r => r.w))].join(' or ');
+            const expected_h = [...new Set(qc_rules.map(r => r.h))].join(' or ');
+            const width_cell  = res_fail.w ? `<span style="color:#f87171" title="Expected: ${expected_w}">${width}</span>`  : width;
+            const height_cell = res_fail.h ? `<span style="color:#f87171" title="Expected: ${expected_h}">${height}</span>` : height;
 
             // FPS: red if set and asset framerate doesn't match any allowed value (within 0.001 for float precision)
             const fps_fail = qc_config.fps.length && framerate !== "" &&
