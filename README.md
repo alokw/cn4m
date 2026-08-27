@@ -181,6 +181,8 @@ unreviewed_assets  →  untracked_repo_assets  →  tracked_repo_assets
 
 **All actions are async**: each button click fires a POST request that starts a Celery task, and the browser polls a `/status/<task_id>` endpoint to update the progress display.
 
+**The worker runs as root** (via `C_FORCE_ROOT=1` in docker-compose). This is intentional: media deliveries arrive owned by `root` when mounted from the host, and the worker needs to write transcode outputs and move files throughout that tree. Running as a non-root user leaves it unable to write into the delivery folders. cn4m is meant to run on a single trusted workstation processing your own media, so container-root is an acceptable trade-off for reliable file access.
+
 ---
 
 ## Common operations

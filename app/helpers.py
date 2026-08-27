@@ -30,6 +30,12 @@ exclude_files = os.getenv("EXCLUDE_FILES").split(", ")  # Filenames to skip duri
 _exclude_folders_raw = os.getenv("EXCLUDE_FOLDERS", "")
 exclude_folders = [p.strip() for p in _exclude_folders_raw.split(",") if p.strip()]
 
+# When False, filename parsing never treats a segment as a SCREEN tag — the
+# whole {id}_{desc}_{version} is split with everything before the version kept
+# as the description. Turn off for projects that use underscores freely in
+# descriptions and don't use screen designations. Default on (backward compat).
+enable_screens = os.getenv("ENABLE_SCREENS", "true").strip().lower() not in ("0", "false", "no", "off")
+
 
 def parse_qc_codecs():
     """
@@ -209,7 +215,24 @@ def run_ffmpeg_preset(preset, src_path, asset_data=None):
             value = value.format(**subs)
         options[key] = value
 
-    stream = ffmpeg.output(*inputs, out_path, **options)
+    # Stream mapping. A preset with more than one input MUST say which stream to
+    # take from which input via a 'map' list (e.g. ['0:v', '1:a'] = video from
+    # input 0, audio from input 1); we select those streams explicitly so
+    # ffmpeg-python emits exactly those -map flags. Passing whole inputs instead
+    # would make ffmpeg-python auto-add '-map 0 -map 1', which pulls the source's
+    # full-resolution video into the output. With no 'map', ffmpeg's default
+    # stream selection applies (fine for single-input presets).
+    maps = output_config.get('map')
+    if maps:
+        output_streams = []
+        for m in maps:
+            idx, _, spec = str(m).partition(':')
+            node = inputs[int(idx)]
+            output_streams.append(node[spec] if spec else node)
+    else:
+        output_streams = inputs
+
+    stream = ffmpeg.output(*output_streams, out_path, **options)
 
     global_args = preset.get('global_args') or []
     if global_args:
@@ -432,10 +455,16 @@ def ensure_workspace_folders():
     WORKSPACE_FOLDER (mounted at /cn4m_assets in the container). Called at
     worker startup so the app is usable on a fresh workspace without the user
     needing to manually create the subdirs.
+
+    This runs before Celery's --uid=nobody privilege drop takes effect, so
+    any directory created here would default to root:root 0755 — unwritable
+    by the worker once it drops to nobody. Explicit chmod(0o777) avoids that,
+    regardless of which user ends up creating the folder.
     """
     for path in (cn4m_repo, cn4m_quarantine):
         if not os.path.exists(path):
             os.makedirs(path, exist_ok=True)
+            os.chmod(path, 0o777)
             print(f"Created workspace folder: {path}")
 
 
@@ -603,7 +632,7 @@ ASSET_FILENAME_PATTERN_NO_SCREEN = re.compile(
     re.IGNORECASE
 )
 
-def parse_asset_filename(filename):
+def parse_asset_filename(filename, enable_screens=None):
     """
     Parse a filename like '1000_prestige_segment_trans_ab_v01_nlc.mov' into:
       id           = '1000'
@@ -630,8 +659,17 @@ def parse_asset_filename(filename):
     convention, the four parsed fields default to empty strings, while basename
     and display_name fall back to the full filename minus the extension (so
     there's always something usable as a display label).
+
+    When enable_screens is False, the screen-aware pattern is skipped entirely,
+    so 'screen' is always '' and the segment that would have been read as a
+    screen stays part of desc (e.g. '1000_prestige_segment_ab_v01.mov' -> desc
+    'prestige_segment_ab'). Version splitting is unaffected. Defaults to the
+    ENABLE_SCREENS env setting.
     """
-    m = ASSET_FILENAME_PATTERN.match(filename)
+    if enable_screens is None:
+        enable_screens = globals()["enable_screens"]
+
+    m = ASSET_FILENAME_PATTERN.match(filename) if enable_screens else None
     if m:
         asset_id = m.group("id")
         desc = m.group("desc")
@@ -654,6 +692,7 @@ def parse_asset_filename(filename):
             "screen": "",
             "version": m.group("version").lower(),
             "basename": f"{asset_id}_{desc}",
+            "display_name": f"{asset_id}_{desc}",
         }
     # Non-conforming filename: fall back to filename-without-extension
     stem = Path(filename).stem
@@ -687,7 +726,7 @@ def fast_hash(input_string, length=32):
     The hash is derived from the file's folder path + filename so the same
     filename in two different folders gets a different ID.
     """
-    h = xxhash.xxh128(input_string).hexdigest()
+    h = xxhash.xxh128(input_string.encode("utf-8")).hexdigest()
     return h[:length]
 
 

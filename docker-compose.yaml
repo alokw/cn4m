@@ -49,8 +49,13 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
       - TZ=${TZ}
+      # The worker must create transcode outputs and move files throughout the
+      # delivery tree, which arrives owned by root (via the Windows bind mount).
+      # Running as root is the only durable way to write into those folders, so
+      # C_FORCE_ROOT lifts Celery's default refusal to run as the root user.
+      - C_FORCE_ROOT=1
     # watchmedo restarts the worker whenever a .py file changes (hot reload)
-    command: ["/bin/sh", "-c", "watchmedo auto-restart --recursive --pattern=*.py -- celery -A app:celery worker --loglevel=info --uid=nobody"]
+    command: ["/bin/sh", "-c", "watchmedo auto-restart --recursive --pattern=*.py -- celery -A app:celery worker --loglevel=info"]
 
   flower:  # Celery monitoring UI
     image: mher/flower

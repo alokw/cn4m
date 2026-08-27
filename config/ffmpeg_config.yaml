@@ -31,12 +31,19 @@
 #     - suffix:     string appended to the original filename stem
 #                   e.g. stem="my_clip", suffix="_hapaudio" → "my_clip_hapaudio.mov"
 #       extension:  output file extension (e.g. "mov", "mp4", "wav")
+#       map:        optional list selecting which input stream feeds the output,
+#                   as "INPUT:STREAM" entries (e.g. "0:v" = video from input 0,
+#                   "1:a" = audio from input 1). REQUIRED whenever a preset has
+#                   more than one input, otherwise ffmpeg pulls every stream from
+#                   every input (e.g. the source's full-res video sneaks in).
+#                   Omit for single-input presets to use ffmpeg's default mapping.
 #       options:    key:value pairs passed as ffmpeg output options
 #                   keys are ffmpeg option names; values are strings or null (for flags)
 #
 #   global_args:
-#     - list of extra arguments appended to the ffmpeg command
-#       used for things like "-map 0:v -map 1:a"
+#     - optional list of extra global ffmpeg arguments (rarely needed).
+#       NOTE: do NOT put "-map" here — use the 'map' field above; global args are
+#       placed after the output filename, where -map has no effect.
 #
 # TIPS
 # ────
@@ -48,9 +55,8 @@
 
 presets:
 
-  # ── Extract Audio to HAP  ────────────────────────────────────────────────
-  # Wraps audio from any media file into a 16×16 black HAP video.
-  # Useful for disguise/d3 media servers that handle video files better than bare audio.
+  # ── Transcode Video to HAP ───────────────────────────────────────────────────
+  # Re-encodes a video file to HAP with stereo PCM audio, keeping the picture.
 
   - name: transcode_hap
     label: "Transcode Video to HAP"
@@ -67,7 +73,6 @@ presets:
           vf: "fps={framerate}"
           ar: 48000
           ac: 2
-          vn: null
     global_args: []
           
   - name: extract_hap_audio
@@ -80,19 +85,17 @@ presets:
     outputs:
       - suffix: "_hapaudio"
         extension: "mov"
+        map:                              # video from input 0 (16x16 black), audio from input 1 (the media file)
+          - "0:v"
+          - "1:a"
         options:
           vcodec: "hap"
           acodec: "pcm_s16le"
           format: "mov"
           vf: "fps={framerate}"
           ar: 48000
-          tune: "stillimage"
           shortest: null
-    global_args:
-      - "-map"
-      - "0:v"
-      - "-map"
-      - "1:a"
+    global_args: []
 
   - name: extract_hap_audio_left
     label: "Extract Audio to 16x16 HAP - Mono L (VO / Narration)"
@@ -104,6 +107,9 @@ presets:
     outputs:
       - suffix: "_hapaudio"
         extension: "mov"
+        map:                              # video from input 0 (16x16 black), audio from input 1 (the media file)
+          - "0:v"
+          - "1:a"
         options:
           vcodec: "hap"
           acodec: "pcm_s16le"
@@ -111,13 +117,8 @@ presets:
           vf: "fps={framerate}"
           ar: 48000
           af: "pan=stereo|c0=c0|c1=0*c0"
-          tune: "stillimage"
           shortest: null
-    global_args:
-      - "-map"
-      - "0:v"
-      - "-map"
-      - "1:a"
+    global_args: []
 
   - name: extract_hap_audio_right
     label: "Extract Audio to 16x16 HAP - Mono R (Dialogue)"
@@ -129,6 +130,9 @@ presets:
     outputs:
       - suffix: "_hapaudio"
         extension: "mov"
+        map:                              # video from input 0 (16x16 black), audio from input 1 (the media file)
+          - "0:v"
+          - "1:a"
         options:
           vcodec: "hap"
           acodec: "pcm_s16le"
@@ -136,13 +140,8 @@ presets:
           vf: "fps={framerate}"
           ar: 48000
           af: "pan=stereo|c0=0*c0|c1=c0"
-          tune: "stillimage"
           shortest: null
-    global_args:
-      - "-map"
-      - "0:v"
-      - "-map"
-      - "1:a"
+    global_args: []
 
   # ── Transcode to H.264 ────────────────────────────────────────────────────────
   # Creates a lightweight H.264 review proxy from any video file.

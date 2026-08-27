@@ -89,6 +89,10 @@ def quarantine_and_transcode(self, assets_json, preset_name):
         return {"current": 0, "total": 0, "status": "COMPLETE", "result": f"preset '{preset_name}' not found"}
 
     # ── Phase 1: Transcode ──────────────────────────────────────────────────
+    # Only assets whose transcode actually completes (no error, and a non-empty
+    # output file exists) are eligible to be quarantined in Phase 2. This keeps
+    # a failed transcode from ever moving the original out from under the user.
+    transcoded_ok = set()
     for asset_id in assets_to_process:
         i += 1
         asset_data = assets["unreviewed_assets"].get(asset_id)
@@ -102,16 +106,20 @@ def quarantine_and_transcode(self, assets_json, preset_name):
         self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': f"transcoding {filename}"})
 
         try:
-            run_ffmpeg_preset(preset, src, asset_data=asset_data)
+            out_path = run_ffmpeg_preset(preset, src, asset_data=asset_data)
+            if out_path and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+                transcoded_ok.add(asset_id)
+            else:
+                print(f"Transcode of {src} produced no output — will not quarantine")
         except Exception as e:
-            print(f"Error transcoding {src} with preset '{preset_name}': {e}")
+            print(f"Error transcoding {src} with preset '{preset_name}': {e} — will not quarantine")
 
         time.sleep(sleep_time)
 
     # Reload assets in case the transcode triggered a check_assets
     assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
 
-    # ── Phase 2: Quarantine originals ───────────────────────────────────────
+    # ── Phase 2: Quarantine originals (only the ones that transcoded) ────────
     for asset_id in assets_to_process:
         i += 1
         asset_data = assets["unreviewed_assets"].get(asset_id)
@@ -119,6 +127,17 @@ def quarantine_and_transcode(self, assets_json, preset_name):
             continue
 
         filename = asset_data["name"]
+
+        # Transcode failed for this asset — leave the original in place and flag it
+        # so the user knows it wasn't quarantined (rather than silently moving it).
+        if asset_id not in transcoded_ok:
+            assets["unreviewed_flags"][asset_id] = assets["unreviewed_assets"].pop(asset_id)
+            assets["unreviewed_flags"][asset_id]["note"] = "transcode failed — original left in place, not quarantined"
+            assets["unreviewed_flags"][asset_id]["severity"] = "warn"
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': f"skipped {filename} (transcode failed)"})
+            time.sleep(sleep_time)
+            continue
+
         src = os.path.join(asset_data["folder"], filename)
         dest = os.path.join(cn4m_quarantine, filename)
 
