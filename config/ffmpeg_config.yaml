@@ -203,3 +203,32 @@ presets:
           vf: "fps={framerate}"
           ac: 2
     global_args: []
+
+  # ── Convert Still to EXR (RLE) ────────────────────────────────────────────────
+  # Converts a still image (png/jpg/tif/dpx/…) to a half-float RGBA OpenEXR with
+  # RLE compression. Also safe to point at a video: it takes the first frame only.
+
+  # ── Convert Still to EXR (uncompressed) ───────────────────────────────────────
+  # Same as the RLE preset above, but stores the pixels uncompressed — larger on
+  # disk (roughly 10x) in exchange for no decode cost on read.
+
+  - name: convert_to_exr_none
+    label: "Convert to EXR (no compression)"
+    description: "Exports an uncompressed half-float RGBA OpenEXR still."
+    inputs:
+      - file: null
+    outputs:
+      - suffix: "_exr"
+        extension: "exr"
+        options:
+          vcodec: "exr"
+          # "format" is the EXR encoder's own option (half | float), NOT the
+          # container format. It MUST be written with the ":v" stream specifier —
+          # a bare "format" key is interpreted as ffmpeg's -f container flag.
+          "format:v": "half"
+          compression: "none"
+          pix_fmt: "gbrapf32le"
+          "frames:v": 1                   # one image out (first frame if given a video)
+          update: 1                       # allow a single image to a plain (non-%04d) filename
+          an: null                        # EXR holds no audio; drop any audio track
+    global_args: []
