@@ -1,6 +1,6 @@
 # cn4m
 
-**cn4m** (a riff on "conform") is a media conformance tool built by Creative Outbox. It scans incoming media deliveries from creative teams, extracts technical metadata from every file, and gives you a fast way to approve or quarantine assets before they go into production. Approved assets are automatically pushed to a Google Sheet for enterprise-level tracking.
+**cn4m** (a riff on "conform") is a media tracking and conformance tool. It scans incoming media deliveries from creative teams, extracts technical metadata from every file, and provides a fast way to approve or quarantine assets before they are pushed to media servers and programmed. Approved assets are pushed to a Google Sheet for tracking.
 
 ## Screenshots
 
@@ -17,8 +17,8 @@
 1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows or Mac).
 2. Clone the repo:
    ```
-   git clone https://github.com/alokw/outbox_cn4m.git
-   cd outbox_cn4m
+   git clone https://github.com/alokw/cn4m.git
+   cd cn4m
    ```
 3. Copy `.env.example` to `.env` and fill in at minimum:
    - `WORKSPACE_FOLDER` — a folder on your machine where media deliveries will land (see [Workspace folder layout](#workspace-folder-layout))
