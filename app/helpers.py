@@ -257,6 +257,21 @@ def connect_to_google_sheet():
     sheet = gc.open_by_key(google_sheet)
     return sheet
 
+def _as_number(value):
+    """
+    Coerce a pymediainfo field to a number for sorting, or None if it isn't numeric.
+    pymediainfo returns most numeric fields as int/float, but some builds hand back
+    strings — this keeps the raw *_bytes / *_ms fields numeric either way.
+    """
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number.is_integer() else number
+
+
 def _file_type_emoji(ext):
     if not ext:
         return ""
@@ -546,9 +561,11 @@ def check_asset(assets, file, filename):
         if track.track_type == "General":
             assets[fileid]["extension"] = track.file_extension
             assets[fileid]["size"] = track.other_file_size[4]  # human-readable size (e.g. "1.2 GiB")
+            assets[fileid]["size_bytes"] = _as_number(track.file_size)  # raw bytes — the UI sorts on this
 
         elif track.track_type == "Video":
             assets[fileid]["duration"] = track.other_duration[4]  # human-readable (e.g. "00:01:30:00")
+            assets[fileid]["duration_ms"] = _as_number(track.duration)  # raw milliseconds — the UI sorts on this
             assets[fileid]["framerate"] = track.frame_rate
             assets[fileid]["width"] = track.width
             assets[fileid]["height"] = track.height
@@ -591,6 +608,7 @@ def check_asset(assets, file, filename):
 
         elif track.track_type == "Audio":
             assets[fileid]["duration"] = track.other_duration[4]
+            assets[fileid]["duration_ms"] = _as_number(track.duration)  # raw milliseconds — the UI sorts on this
             assets[fileid]["audio"] = track.commercial_name         # e.g. "PCM", "AAC"
             assets[fileid]["audio_channels"] = track.channel_s
             assets[fileid]["audio_rate"] = track.sampling_rate
