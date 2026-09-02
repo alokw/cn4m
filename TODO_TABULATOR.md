@@ -214,15 +214,32 @@ Suggested commit: `style: match tabulator theme to cn4m dark ui`
     - Cells with no value, and non-filterable columns like the checkbox, offer only the clear options. Menu labels are HTML-escaped.
 
   - **Follow-up after review:** the audio select/de-select buttons were removed — the column filters cover that need now (`is_audio_ext` stays, still used by the Screen/Stem sorter and the file-type icons). The QC control became **two** buttons: `SHOW FLAGGED ONLY (12)` (the filter toggle, renamed) and `SELECT ALL FLAGGED` (selects the flagged rows in place). The select action is scoped to `getRows("active")`, matching the header select-all, so it can never select a row hidden by a filter.
-- [ ] **Persistence:** `persistence: {sort: true, filter: true, columns: true}` + `persistenceID: "cn4m-review"` (localStorage). Verify a stale persisted layout doesn't hide new columns.
-- [ ] **Spreadsheet feel:** `selectableRange`, `clipboard: true` for copy-out to Sheets/Excel. Confirm range-select doesn't fight row-selection checkboxes (Tabulator 6 supports both; test click interactions carefully).
-- [ ] **Export:** small DOWNLOAD CSV button (`table.download("csv", ...)`).
+- [x] **Persistence** *(done — needs testing)*: `persistence: { columns: true, sort: true }` under `persistenceID: "cn4m-review-v1"`. Column widths, order and the active sort survive a reload.
+  - **Filters are deliberately NOT persisted**, contrary to the original plan. A scan is a fresh batch of deliveries; restoring yesterday's `Ext = wav` filter would hide new arrivals on load, and APPROVE/QUARANTINE move real files. Layout persisting is a convenience, filters persisting is a correctness risk, so the asymmetry is intentional. One word (`filter: true`) to enable if wanted.
+  - **Versioned persistence ID.** A stale saved layout keyed by field could mis-size or hide a column added later; bumping `-v1` invalidates it. Noted in the code comment next to the constant.
+  - **Added "Reset column layout" to the right-click menu.** Persisted widths stick, so a layout dragged into a mess would otherwise need a manual localStorage purge — persistence without a reset is a trap. It clears by key *prefix* (this build has no `clearPersistence`, and the per-key suffixes are internal) and re-applies the column definitions in place rather than reloading, which would throw away the current scan. Wrapped in try/catch so a browser with storage disabled still resets the columns.
+  - Note: with widths persisted, Tabulator marks them fixed, so a later scan with longer filenames won't auto-widen a column you've sized. That's the intended trade-off; the reset restores auto-fit.
+- [x] **Spreadsheet feel** *(done, scoped down — needs testing)*: `clipboard: "copy"` so Ctrl/Cmd-C copies the table out as TSV, pasteable straight into Sheets or Excel.
+  - **`selectableRange` was NOT used — Tabulator 6 forbids it alongside row selection.** The library says so itself: `selectableRange` + `selectableRows` logs *"SelectRange functionality cannot be used in conjunction with..."*, and a `selectableRows: "highlight"` config is silently rewritten to `selectableRows = false` when ranges are on. Row selection is what feeds `getSelectedData()`, so enabling cell ranges would have broken approve, quarantine and transcode outright. The plan's assumption that "Tabulator 6 supports both" was wrong.
+  - Clipboard copy delivers the actual goal (get data out to a spreadsheet) with no such conflict. `clipboardCopyRowRange: "active"` means you copy the rows passing your current filters — what you see is what you get. `clipboardCopyStyled: false` and `formatCells: false` send the underlying values rather than the icon/QC markup, so it pastes as clean data. Paste is disabled (`"copy"`, not `true`) since this is a review table.
+- [x] ~~**Export:** DOWNLOAD CSV button~~ — dropped at your request; clipboard copy covers the need.
 
 **Test after each:** the feature itself + FULL CYCLE steps 6–8 (sort/select/approve still correct with filters active).
 
 ---
 
-## Phase 7 — Docs & cleanup
+## Phase 7 — Docs & cleanup *(done except the screenshot)*
 
-- [ ] README: mention Tabulator + version in the stack notes; retake the review-table screenshot (also closes part of the "screenshots" item in TODO.md).
-- [ ] Fold the Phase 0 known-bug notes into the commit history / delete this file when done.
+- [x] **New "Reviewing assets" section in the README** covering sorting, per-column filters, the numeric operators (with the seconds/MiB units for Duration and Size), right-click filtering, the flagged-asset buttons, filter-aware selection and the hidden-selection warning, clipboard copy, and column-layout persistence + reset.
+- [x] Tabulator 6.5.2 noted in the technical overview, alongside the fact that the frontend has no build step — everything is vendored in `app/static/`.
+- [x] **Fixed a stale doc reference**: the Workflow section still told users to click **SELECT ALL AUDIO**, a button removed during Phase 6. Now points at the flagged-asset buttons instead.
+- [x] Verified every internal README anchor link resolves.
+- [ ] **Retake the review-table screenshot** — needs the app running against real media, so it's yours to take. `docs/screenshots/review-table.png`, then uncomment the image line under `## Screenshots`. Also closes part of the screenshots item in `TODO.md`.
+
+---
+
+## Status: complete
+
+Phases 0–7 are done bar the screenshot. This file is a historical record of the migration — the findings that still matter live in code comments (`fitDataStretch` and why, the versioned `persistenceID`, the stale-`dataFiltered` note) and in the README.
+
+Safe to delete whenever you like: `git rm TODO_TABULATOR.md`. Kept for now rather than removed unilaterally, since it documents several Tabulator gotchas that were expensive to find.

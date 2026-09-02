@@ -25,6 +25,11 @@ let asset_table = null;
 // replacing them, so the toggle and the column filters compose.
 let qc_filter_active = false;
 
+// localStorage key for the persisted column layout and sort. Bump the version
+// suffix whenever asset_columns() changes shape, so an old saved layout can't
+// mis-size or hide a newly added column.
+const PERSISTENCE_ID = "cn4m-review-v1";
+
 // Extension groups, shared by the file-type icons and the audio-selection
 // helpers. Compared lowercase with any leading dot stripped.
 const AUDIO_EXTS = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
@@ -429,6 +434,23 @@ function header_filter_value_for(cell) {
   return value === null || value === undefined || value === "" ? null : String(value);
 }
 
+// Persisted widths stick, so a layout dragged into a mess would otherwise need
+// a manual localStorage purge. Clearing by prefix avoids depending on
+// Tabulator's per-key suffixes, and re-applying the definitions rebuilds the
+// default layout without a page reload — which would throw away the scan.
+function reset_table_layout() {
+  if (!asset_table) return;
+  const prefix = "tabulator-" + PERSISTENCE_ID;
+  try {
+    Object.keys(window.localStorage)
+      .filter(key => key.indexOf(prefix) === 0)
+      .forEach(key => window.localStorage.removeItem(key));
+  } catch (err) {
+    console.warn("could not clear persisted layout", err);  // private mode, etc.
+  }
+  asset_table.setColumns(asset_columns());
+}
+
 function cell_context_menu(e, cell) {
   const column = cell.getColumn();
   const filterable = !!column.getDefinition().headerFilter;
@@ -450,6 +472,10 @@ function cell_context_menu(e, cell) {
   items.push({
     label: "Clear all filters",
     action: () => asset_table.clearHeaderFilter(),
+  });
+  items.push({
+    label: "Reset column layout",
+    action: reset_table_layout,
   });
   return items;
 }
@@ -526,6 +552,19 @@ function render_asset_table(assets_by_id) {
     layout: "fitDataStretch",
     maxHeight: "75vh",            // long scans scroll inside the table (virtual DOM)
     placeholder: "No new assets found.",
+    // Column widths/order and the sort survive a reload. Filters deliberately
+    // do NOT — see reset_table_layout() and the note in TODO_TABULATOR.md.
+    persistence: { columns: true, sort: true },
+    persistenceID: PERSISTENCE_ID,
+    // Ctrl/Cmd-C copies the table out as TSV for Sheets/Excel. "copy" (not true)
+    // leaves paste disabled — this is a review table, not an editable one.
+    // Row range "active" = the rows passing the current filters, so what you
+    // copy is what you see. clipboardCopyStyled:false and formatCells:false send
+    // the underlying values rather than our icon/QC markup.
+    clipboard: "copy",
+    clipboardCopyRowRange: "active",
+    clipboardCopyStyled: false,
+    clipboardCopyConfig: { columnHeaders: true, formatCells: false, rowGroups: false, columnCalcs: false },
     selectableRows: true,
     columnDefaults: {
       headerHozAlign: "left",

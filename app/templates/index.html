@@ -41,9 +41,8 @@
         <div class="d-flex justify-content-between align-items-center pb-2">
             <div class="text-uppercase fw-semibold obx-orange">2. review assets</div>
             <div class="review-buttons" style="display:none; margin-left:auto;">
-                <button id="select-audio" class="obx-button">SELECT ALL AUDIO</button>
-                <button id="deselect-audio" class="obx-button" style="margin-left:0.5rem;">DE-SELECT ALL AUDIO</button>
-                <button id="toggle-qc" class="obx-button" style="margin-left:0.5rem;">QC FAILS ONLY</button>
+                <button id="toggle-qc" class="obx-button">SHOW FLAGGED ONLY</button>
+                <button id="select-flagged" class="obx-button" style="margin-left:0.5rem;">SELECT ALL FLAGGED</button>
             </div>
         </div>
         <div id="results"></div>
@@ -83,9 +82,8 @@ $(function() { $('#quarantine-assets').click(quarantine_assets); });
 $(function() { $('#track-assets').click(track_assets); });
 $(function() { $('#transcode-assets').click(transcode_assets); });
 $(function() { $('#quarantine-transcode-assets').click(quarantine_and_transcode); });
-$(function() { $('#select-audio').click(select_all_audio); });
-$(function() { $('#deselect-audio').click(deselect_all_audio); });
 $(function() { $('#toggle-qc').click(toggle_qc_filter); });
+$(function() { $('#select-flagged').click(select_all_flagged); });
 $(load_ffmpeg_presets);
 $(load_qc_config);
 

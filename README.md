@@ -37,7 +37,7 @@ To stop: `docker compose down`. A Celery task dashboard (Flower) is also availab
 ## What it does
 
 1. **Scan** — Walks a watched folder (your media delivery drop) and extracts metadata from every new file: codec, resolution, framerate, duration, audio format, sample rate, bit depth, file size, and timestamps.
-2. **Review** — Displays all new assets in a sortable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec, resolution, or framerate) are highlighted red.
+2. **Review** — Displays all new assets in a sortable, filterable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec, resolution, or framerate) are highlighted red, and a single button narrows the table to just the flagged assets. See [Reviewing assets](#reviewing-assets).
 3. **Approve or Quarantine** — Approved files stay in place and are ready to track. Quarantined files are physically moved to a separate folder for manual review.
 4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`. QC failures are highlighted red in the sheet too.
 5. **Transcode** — Runs selected assets through configurable ffmpeg presets (HAP, H.264 proxies, WAV extraction, audio-to-HAP wrapping for disguise/d3 media servers), optionally quarantining the originals afterward.
@@ -143,9 +143,9 @@ Once the app is open in your browser:
 Click **START** to scan the repo folder for new files. A progress bar shows each file being analyzed. When complete, all new assets appear in the table below.
 
 **2. Review Assets**
-The table shows each file's folder, name, screen, version, duration, codec, resolution, framerate, audio specs, and size. Click any column header to sort. Use the checkboxes to select files (**SELECT ALL AUDIO** grabs every audio file at once).
+The table shows each file's folder, name, screen, version, duration, codec, resolution, framerate, audio specs, and size. Sort by any column, filter by any column, and tick the rows you want to act on — see [Reviewing assets](#reviewing-assets) for the full set of controls.
 
-- Codec, resolution, and framerate cells that fail your QC rules appear in red (hover for the expected value).
+- Codec, resolution, and framerate cells that fail your QC rules appear in red (hover for the expected value). **SHOW FLAGGED ONLY** narrows the table to just those files, and **SELECT ALL FLAGGED** selects them.
 - Flagged files (invalid or corrupt) appear below the table with a warning note.
 
 **3. Approve, Quarantine, or Transcode**
@@ -160,6 +160,70 @@ Click **UPDATE GOOGLE SHEET** to push all approved (not yet tracked) assets to t
 
 ---
 
+## Reviewing assets
+
+The review table (step 2) is built on [Tabulator](https://tabulator.info/) 6.5.2, vendored in `app/static/` — no build step or package manager involved.
+
+### Sorting
+
+Click any column header to sort, click again to reverse. Duration and Size sort by real magnitude rather than by their displayed text, and Screen / Stem groups audio files together ahead of everything else.
+
+### Filtering
+
+Every column has a filter box under its header.
+
+| Column type | Filter |
+|---|---|
+| Folder, Name | type any text — matches anywhere in the value, case-insensitive |
+| Screen, Version, Ext, Codec, Audio | dropdown of the values present in this scan |
+| Width, Height, FPS, Rate, Bits, Ch, Duration, Size | number, with comparison operators |
+
+Numeric columns accept operators, so you can type:
+
+```
+2992      exactly 2992
+>3000     greater than 3000
+>=3000    3000 or more
+<3000     less than 3000
+<=3000    3000 or less
+!=1080    anything but 1080
+```
+
+**Duration filters in seconds and Size filters in MiB** (the units are shown in each box), even though the columns display a timecode and a human-readable size. Files with no value for a column — an audio stem has no width — are excluded whenever that column is filtered.
+
+**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout.
+
+### Flagged assets
+
+"Flagged" means the asset fails any QC rule — codec, resolution or framerate — i.e. the rows showing red cells. Two buttons sit above the table:
+
+- **SHOW FLAGGED ONLY (n)** — narrows the table to flagged assets. The count tells you how many the scan found without your having to click. Combines with the column filters rather than replacing them.
+- **SELECT ALL FLAGGED** — selects the flagged rows in place, ready for QUARANTINE or TRANSCODE.
+
+Both turn orange while active, and both disappear if no QC rules are configured in `.env`.
+
+### Selecting
+
+Tick rows individually, or use the checkbox in the header to select everything. **Selection follows your filters**: the header checkbox and SELECT ALL FLAGGED only ever touch rows you can currently see.
+
+A count next to the action buttons shows how many assets are selected. Because a selection survives a filter change, it reads `12 selected (3 hidden by filter)` when some of the selected rows are no longer visible — worth a glance before approving or quarantining, since those actions move real files.
+
+### Copying to a spreadsheet
+
+Click anywhere in the table and press **Ctrl+C** (**Cmd+C** on Mac) to copy it to the clipboard as tab-separated text, ready to paste into Google Sheets or Excel. Column headers are included, and the values are copied as plain data — no icons or formatting.
+
+**You copy what you can see**: only the rows passing the current filters are copied, in the current sort order. So to send someone the flagged assets from a delivery, click SHOW FLAGGED ONLY, then copy. Pasting *into* the table does nothing — it's a review table, not a spreadsheet.
+
+### Column layout
+
+Drag a column's edge to resize it, including narrower than its contents — long filenames get truncated with an ellipsis. Widths, order and the current sort are remembered in your browser between sessions.
+
+Filters are deliberately **not** remembered, so a new scan always opens showing everything.
+
+To get back to the defaults, right-click any cell and choose **Reset column layout**. Double-clicking a column's edge re-fits just that column to its contents.
+
+---
+
 ## How it works (technical overview)
 
 cn4m runs as four Docker services:
@@ -170,6 +234,8 @@ cn4m runs as four Docker services:
 | `worker` | Celery worker — runs all the background tasks (scanning, moving files, transcoding, Google Sheets) |
 | `redis` | Message broker between Flask and Celery |
 | `flower` | Celery task monitoring dashboard (http://localhost:5555) |
+
+**The frontend** is a single page with no build step: jQuery, Bootstrap and Tabulator 6.5.2 are vendored as plain files in `app/static/`. `cn4m.js` polls the task status endpoint and owns the review table — column definitions, QC formatting, filters and selection.
 
 **State** is stored in `assets.json` in the repo folder. Every file gets a unique ID (xxhash of its folder path + filename), and assets move through these buckets as they progress:
 
