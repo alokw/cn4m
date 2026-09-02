@@ -89,6 +89,10 @@ Suggested commit: `refactor: keep scan results in a JS data store instead of the
 
 **Test:** hard-refresh http://localhost:5000. Expect: page looks **completely unchanged**, no console errors, and `typeof Tabulator` in the console returns `"function"`.
 
+**Gotcha found during this phase — template caching.** `typeof Tabulator` came back `undefined` even though the file served fine (200, full 445,984 bytes). Cause: Flask was serving a *cached compiled template*, so the new `<script>` tag never reached the browser. `docker-compose.yaml` sets `FLASK_ENV=development`, but that variable has been a **no-op since Flask 2.3** (running 3.1.3 here), so `app.debug` was `False` and `jinja_env.auto_reload` with it. Static files (`.js`/`.css`) are read from disk per request — which is why the Phase 1 `cn4m.js` work appeared without a restart and this didn't.
+
+Fixed durably by setting `app.config["TEMPLATES_AUTO_RELOAD"] = True` in `app/__init__.py` (verified `True` at runtime). **Any future `index.html` edit — e.g. the Phase 6 filter/download buttons — now takes effect on refresh with no restart.** Deliberately did *not* switch on full debug mode, which would also enable the interactive debugger.
+
 Suggested commit: `chore: vendor tabulator 6.5.2`
 
 ---

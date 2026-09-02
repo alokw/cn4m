@@ -34,6 +34,14 @@ def create_app():
     app.config["CELERY_BROKER_URL"] = os.getenv("CELERY_BROKER_URL")
     app.config["result_backend"] = os.getenv("RESULT_BACKEND")
 
+    # Recompile templates when they change on disk. Flask normally ties this to
+    # debug mode, but FLASK_ENV=development (set in docker-compose) has been a
+    # no-op since Flask 2.3, so debug is off and templates would otherwise be
+    # compiled once and cached for the life of the process — meaning edits to
+    # index.html only appear after a container restart. Static files (js/css)
+    # are unaffected; they are read from disk per request.
+    app.config["TEMPLATES_AUTO_RELOAD"] = True
+
     # Store celery as a module-level global so tasks.py and routes.py can import it
     global celery
     celery = make_celery(app)
