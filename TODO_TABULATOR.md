@@ -140,21 +140,48 @@ Suggested commit: `feat: render review table with tabulator`
 
 ---
 
-## Phase 4 — Delete legacy table code
+## Phase 4 — Delete legacy table code *(code done — needs FULL CYCLE)*
 
-- [ ] Remove `makeTableSortable`, `toggle_checkboxes`, the old DOM-scraping bodies of the audio helpers, and the table template string remnants.
-- [ ] `grep -n "sortableTable\|review_checkbox\|makeTableSortable\|toggle_checkboxes" app/` → should only hit this file's history, not live code.
+- [x] Removed `makeTableSortable()` — the hand-rolled DOM sorter, dead since Phase 3.
+- [x] Removed `toggle_checkboxes()` — Tabulator's `rowSelection` header does this.
+- [x] Removed `is_audio_asset(fileid)` — `makeTableSortable` was its only caller; `is_audio_ext(ext)` remains and is used by the screen sorter and audio selection.
+- [x] **Removed `scan_assets` entirely.** With `is_audio_asset` gone nothing read it, leaving it write-only. The Tabulator instance now *is* the data model — a parallel store would only be a desync risk. This retires the Phase 1 scaffold, which had done its job of getting the data off the DOM.
+- [x] Updated the file header comment, which still described hand-rolled sorting and checkbox selection.
+- [x] Verified: no live references to `sortableTable`, `review_checkbox`, `makeTableSortable`, `toggle_checkboxes`, `scan_assets`, `is_audio_asset`, or `data-type=` anywhere under `app/`.
+- [x] Swept every remaining function for reachability — all are either called or passed as formatter/sorter values in the column defs.
+- [x] Re-ran the Phase 3 suite against the trimmed file: **32/32 still pass.**
 
-**Test:** FULL CYCLE. Commit: `chore: remove legacy table code`.
+Net: `cn4m.js` is **581 lines, down from 656** — and that includes everything Tabulator added.
+
+**Test:** FULL CYCLE. This phase only deletes unreachable code, so any difference from the Phase 3 build is a real regression worth reporting.
+
+Suggested commit: `chore: remove legacy table code`
 
 ---
 
-## Phase 5 — Theme pass
+## Phase 5 — Theme pass *(code done — needs your eyes)*
 
-- [ ] Override `tabulator_midnight` in `cn4m.css` to match the app: `#222`/`#1a1a1a` backgrounds, `#606060` borders, striped rows, `fs-8`-equivalent font size, `#F99D38` accents on sort arrows/hover, red `qc-fail` = `#f87171`.
-- [ ] Compare against the Phase 0 screenshots side-by-side.
+Tuned for the stated priority: hundreds of rows, scannable at a glance, QC flags must pop.
 
-**Test:** visual only + quick FULL CYCLE steps 3–7. Commit: `style: match tabulator theme to cn4m dark ui`.
+- [x] **Rows much darker, striping barely there.** The theme shipped `#666` rows with `#444` stripes — very light and high-contrast, which is what read as wrong. Now `#1b1b1b` / `#1f1f1f`: darker than the `#222` panel, so the table reads as recessed, with just enough stripe to track across 16 columns.
+- [x] **All grid borders removed** — cell dividers, header rule, table outline, frozen-column divider. Separation now comes from spacing and colour alone.
+- [x] **Padding cut** — cells `1px 5px` (was `4px`), row min-height 18px (was 22px). Cells are single-line with ellipsis, so one long filename can't make a tall row and break the rhythm.
+- [x] **Smaller, lighter type** — `0.72rem` / weight 300 body (was 14px / normal, and 0.7625em previously). Headers are `0.66rem`, uppercase, letter-spaced, muted `#8a8a8a`, so they read as labels rather than competing with data.
+- [x] **QC failures carry the only strong colour** — brighter `#ff6b6b`, weight 500, on a faint tinted chip, so a failing cell is findable by *shape* as well as colour when skimming.
+- [x] **Selection uses obx orange** (`rgba(249,157,56,.16)`) — it's the primary action, and the tint stays legible across striping and hover.
+- [x] Sort arrows shrunk to 4px and recoloured — inactive `#4a4a4a`, active obx orange.
+- [x] Dark scrollbar, muted empty-state text, brand-orange checkbox via `accent-color`.
+
+**Careful bit:** the sort arrows are CSS triangles built *from borders*, so "remove all borders" had to be done selector-by-selector rather than with a blanket rule — a global `border: none` would have deleted the arrows entirely.
+
+**Automated check:** every override was verified to match or beat the theme's selector specificity (it loads after `tabulator_midnight.min.css`), so nothing silently loses the cascade. The theme's only `!important` rules are on column-calculation rows, which this table doesn't use.
+
+**Test:** run a scan and look at it. Knobs, all one-liners:
+- stripe intensity → `.tabulator-row.tabulator-row-even` background
+- density → `.tabulator-row .tabulator-cell` padding + `.tabulator-row` min-height
+- if the QC chip reads as too busy → drop `background-color`/`padding` from `.qc-fail`, keeping the colour and weight
+
+Suggested commit: `style: match tabulator theme to cn4m dark ui`
 
 ---
 

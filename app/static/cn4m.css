@@ -96,14 +96,200 @@ body {
   color: yellow;
 }
 /* ── Review table (Tabulator) ────────────────────────────────────────────────
-   Minimal rules needed for the table to render correctly; the full theme pass
-   that matches Tabulator to the cn4m dark UI comes later. */
+   Overrides the vendored midnight theme to match the cn4m dark UI. Tuned for
+   long scans (hundreds of rows): dark, near-flat surfaces and tight rows so
+   more fits on screen, with QC failures and selection carrying the only strong
+   colour so they pop while scanning. Loaded after tabulator_midnight.min.css,
+   so equal-specificity selectors win — most rules below mirror the theme's own
+   selector shape deliberately. */
+
+/* Table shell — sits directly on the panel, no chrome of its own */
+.tabulator {
+	background-color: transparent;
+	border: none;
+	font-size: 0.78rem;
+	font-weight: 300;
+	color: #d0d0d0;
+}
+
+.tabulator .tabulator-tableholder .tabulator-table {
+	background-color: transparent;
+	color: #d0d0d0;
+}
+
+.tabulator .tabulator-tableholder:focus {
+	outline: none;
+}
+
+/* Header — no borders; separation comes from weight and colour instead */
+.tabulator .tabulator-header {
+	background-color: transparent;
+	border-bottom: none;
+	color: #8a8a8a;
+	font-weight: 500;
+}
+
+.tabulator .tabulator-header .tabulator-col {
+	background-color: transparent;
+	background: transparent;
+	border-right: none;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+	padding: 2px 5px;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-title {
+	font-size: 0.70rem;
+	font-weight: 600;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: #8a8a8a;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable .tabulator-col-title {
+	padding-right: 14px;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable.tabulator-col-sorter-element:hover {
+	background-color: #262626;
+}
+
+/* Sort arrows are CSS triangles built from borders — shrunk and recoloured,
+   never blanket-removed, or they disappear entirely. Active sort = obx orange. */
+.tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+	border-left: 4px solid transparent;
+	border-right: 4px solid transparent;
+	border-bottom: 4px solid #555;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="none"] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+	border-bottom: 4px solid #4a4a4a;
+	border-top: none;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="none"] .tabulator-col-content .tabulator-col-sorter.tabulator-col-sorter-element .tabulator-arrow:hover {
+	border-bottom: 4px solid #F99D38;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="ascending"] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+	border-bottom: 4px solid #F99D38;
+	border-top: none;
+}
+
+.tabulator .tabulator-header .tabulator-col.tabulator-sortable[aria-sort="descending"] .tabulator-col-content .tabulator-col-sorter .tabulator-arrow {
+	border-bottom: none;
+	border-top: 4px solid #F99D38;
+}
+
+/* Rows — darker than the #222 panel so the table reads as recessed, with
+   striping just strong enough to track across 16 columns */
+.tabulator-row {
+	background-color: #1b1b1b;
+	min-height: 20px;
+	border-bottom: none;
+}
+
+.tabulator-row.tabulator-row-even {
+	background-color: #272727;
+}
+
+.tabulator-row.tabulator-selectable:hover {
+	background-color: #2b2b2b;
+}
+
+/* Selection is the primary action here (approve / quarantine / transcode),
+   so it gets the brand orange rather than a neutral tint */
+.tabulator-row.tabulator-selected,
+.tabulator-row.tabulator-selected.tabulator-row-even {
+	background-color: rgba(249, 157, 56, 0.16);
+}
+
+.tabulator-row.tabulator-selected:hover {
+	background-color: rgba(249, 157, 56, 0.24);
+}
+
+/* Cells — no dividers, minimal padding, single line so row heights stay uniform */
+.tabulator-row .tabulator-cell {
+	border-right: none;
+	padding: 3px 5px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* The frozen checkbox column is sticky, so it must be OPAQUE — the Phase 5
+   transparent-header rule let the other column headers scroll visibly
+   underneath it. Body cells were unaffected because they inherit the row's
+   solid background. #222 matches the .bg-darkish panel behind the header. */
+.tabulator .tabulator-header .tabulator-col.tabulator-row-header,
+.tabulator .tabulator-header .tabulator-col.tabulator-frozen {
+	background-color: #222;
+	background: #222;
+}
+
+/* Checkbox column: inherit the row background so striping and selection
+   run unbroken across the frozen edge */
+.tabulator-row .tabulator-cell.tabulator-row-header {
+	background: inherit;
+	border-bottom: none;
+	border-right: none;
+}
+
+.tabulator .tabulator-header .tabulator-frozen.tabulator-frozen-left,
+.tabulator-row .tabulator-cell.tabulator-frozen.tabulator-frozen-left {
+	border-right: none;
+}
+
+.tabulator input[type="checkbox"] {
+	accent-color: #F99D38;
+	cursor: pointer;
+}
+
+/* Empty state */
+.tabulator .tabulator-tableholder .tabulator-placeholder .tabulator-placeholder-contents {
+	color: #777;
+	font-size: 0.8rem;
+	font-weight: 300;
+}
+
+/* Scrollbar — dark, so a long scan doesn't put a bright bar down the side */
+.tabulator .tabulator-tableholder::-webkit-scrollbar,
+.tabulator .tabulator-tableholder::-webkit-scrollbar:horizontal {
+	width: 10px;
+	height: 10px;
+}
+
+.tabulator .tabulator-tableholder::-webkit-scrollbar-track {
+	background: #1a1a1a;
+}
+
+.tabulator .tabulator-tableholder::-webkit-scrollbar-thumb {
+	background: #3a3a3a;
+	border-radius: 5px;
+}
+
+.tabulator .tabulator-tableholder::-webkit-scrollbar-thumb:hover {
+	background: #4a4a4a;
+}
+
+/* ── QC failures ─────────────────────────────────────────────────────────────
+   The one thing that must pop out of a wall of low-contrast text: brighter red
+   than the surrounding grey, slightly heavier, on a faint tinted chip so a
+   failing cell is findable by shape as well as colour. Drop the background and
+   padding here if it reads as too busy. */
 
 .qc-fail {
-	color: #f87171;
+	color: #ff6b6b;
+	font-weight: 500;
+	background-color: rgba(255, 107, 107, 0.12);
+	border-radius: 2px;
+	padding: 0 3px;
 }
 
 .cell-icon {
 	height: 1em;
 	vertical-align: middle;
+	opacity: 0.85;
+	margin-right: 6px;
 }
