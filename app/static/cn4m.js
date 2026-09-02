@@ -404,6 +404,56 @@ function number_filter(field, scale, placeholder) {
   };
 }
 
+// ── Right-click to filter ─────────────────────────────────────────────────────
+// Right-clicking a cell offers to filter that column by the clicked value. The
+// value is written into the column's own header filter, so the filter is
+// visible and clearable the normal way rather than being hidden state.
+
+// Columns whose displayed text isn't what their filter expects: Duration shows
+// a timecode but filters in seconds, Size shows "1.2 GiB" but filters in MiB.
+// [raw field, divisor] — rounded to 3dp, which stays inside operator_match's
+// 0.001 tolerance so the clicked row always matches.
+const FILTER_VALUE_SOURCE = {
+  duration: ["duration_ms", 1000],
+  size: ["size_bytes", 1048576],
+};
+
+function header_filter_value_for(cell) {
+  const source = FILTER_VALUE_SOURCE[cell.getColumn().getField()];
+  if (source) {
+    const raw = Number(cell.getData()[source[0]]);
+    if (!isFinite(raw)) return null;
+    return String(Math.round((raw / source[1]) * 1000) / 1000);
+  }
+  const value = cell.getValue();
+  return value === null || value === undefined || value === "" ? null : String(value);
+}
+
+function cell_context_menu(e, cell) {
+  const column = cell.getColumn();
+  const filterable = !!column.getDefinition().headerFilter;
+  const value = filterable ? header_filter_value_for(cell) : null;
+  const items = [];
+
+  if (value !== null) {
+    items.push({
+      label: `Filter by &ldquo;${escape_html(value)}&rdquo;`,
+      action: () => column.setHeaderFilterValue(value),
+    });
+  }
+  if (filterable && column.getHeaderFilterValue()) {
+    items.push({
+      label: "Clear this column&rsquo;s filter",
+      action: () => column.setHeaderFilterValue(""),
+    });
+  }
+  items.push({
+    label: "Clear all filters",
+    action: () => asset_table.clearHeaderFilter(),
+  });
+  return items;
+}
+
 function asset_columns() {
   return [
     { title: "Folder",        field: "parent",         formatter: folder_formatter,  maxInitialWidth: 260, ...TEXT_FILTER },
@@ -477,7 +527,11 @@ function render_asset_table(assets_by_id) {
     maxHeight: "75vh",            // long scans scroll inside the table (virtual DOM)
     placeholder: "No new assets found.",
     selectableRows: true,
-    columnDefaults: { headerHozAlign: "left", vertAlign: "middle" },
+    columnDefaults: {
+      headerHozAlign: "left",
+      vertAlign: "middle",
+      contextMenu: cell_context_menu,  // right-click a value to filter by it
+    },
     rowHeader: {
       formatter: "rowSelection",
       titleFormatter: "rowSelection",
@@ -497,14 +551,22 @@ function render_asset_table(assets_by_id) {
   // Selection survives a filter change, so a row can be selected while hidden.
   // Show the count next to the action buttons to keep that honest.
   asset_table.on("tableBuilt", update_qc_button);
-  asset_table.on("rowSelectionChanged", () => update_selection_count());
+  asset_table.on("rowSelectionChanged", () => {
+    update_selection_count();
+    update_flagged_select_button();
+  });
   // dataFiltered is dispatched from *inside* Tabulator's filter routine, before
   // the filtered set is assigned to activeRows — so getRows("active") is one
   // filter-change stale in here. The event's second argument is the fresh set.
-  asset_table.on("dataFiltered", (filters, rows) => update_selection_count(rows));
+  asset_table.on("dataFiltered", (filters, rows) => {
+    update_selection_count(rows);
+    update_flagged_select_button();
+  });
 }
 
-// ── QC fails filter ───────────────────────────────────────────────────────────
+// ── Flagged assets: filter + select ───────────────────────────────────────────
+// "Flagged" = fails any QC rule (codec, resolution or framerate), i.e. the rows
+// showing red cells.
 
 function toggle_qc_filter() {
   if (!asset_table) return;
@@ -521,28 +583,68 @@ function set_qc_filter(active) {
   $('#toggle-qc').toggleClass('obx-button-active', active);
 }
 
-// Label carries the failure count, so a finished scan reports its QC state at a
-// glance without anyone having to click. Hidden entirely when no QC rules are
-// configured, disabled when the scan is clean.
+// Flagged rows currently passing the filters. Scoped to "active" to match the
+// header select-all, so we never touch a row the user can't see.
+function flagged_rows_in_view() {
+  if (!asset_table) return [];
+  return asset_table.getRows("active").filter(row => row.getData().qc_fail);
+}
+
+// True when every visible flagged row is already selected — this drives the
+// toggle's direction, so manually unticking one flags the button back to
+// "select" rather than leaving it out of step with the table.
+function all_flagged_selected() {
+  const flagged = flagged_rows_in_view();
+  if (!flagged.length) return false;
+  const selected = new Set(asset_table.getSelectedRows());
+  return flagged.every(row => selected.has(row));
+}
+
+function select_all_flagged() {
+  if (!asset_table) return;
+  const flagged = flagged_rows_in_view();
+  if (!flagged.length) return;
+  if (all_flagged_selected()) {
+    asset_table.deselectRow(flagged);
+  } else {
+    asset_table.selectRow(flagged);
+  }
+}
+
+// Matches SHOW FLAGGED ONLY: the label stays put and the orange highlight
+// carries the state, so both toggles read the same way.
+function update_flagged_select_button() {
+  $('#select-flagged').toggleClass('obx-button-active', all_flagged_selected());
+}
+
+// The filter button's label carries the count, so a finished scan reports its QC
+// state at a glance without anyone having to click. Both buttons hide entirely
+// when no QC rules are configured, and disable when the scan is clean.
 function update_qc_button() {
-  const button = $('#toggle-qc');
+  const filter_button = $('#toggle-qc');
+  const select_button = $('#select-flagged');
   if (!asset_table) return;
 
   if (!qc_rules_configured()) {
-    button.hide();
+    filter_button.hide();
+    select_button.hide();
     return;
   }
 
   const failing = asset_table.getData().filter(row => row.qc_fail).length;
-  button.show();
+  filter_button.show();
+  select_button.show();
 
   if (!failing) {
     if (qc_filter_active) set_qc_filter(false);  // don't leave an empty table behind
-    button.text("NO QC FAILS").prop("disabled", true);
+    filter_button.text("NO FLAGGED ASSETS").prop("disabled", true);
+    select_button.prop("disabled", true);
     return;
   }
 
-  button.text(`QC FAILS ONLY (${failing})`).prop("disabled", false);
+  filter_button.text(`SHOW FLAGGED ONLY (${failing})`).prop("disabled", false);
+  select_button.prop("disabled", false);
+  update_flagged_select_button();
 }
 
 
@@ -642,28 +744,6 @@ function get_file_type_icon(ext) {
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-// Check or uncheck every audio row, deciding audio-ness from the scan data
-// rather than from the rendered Ext column.
-function set_audio_selection(checked) {
-  if (!asset_table) return;
-  // "active" = rows currently passing any filters, so this stays correct in Phase 6
-  const audio_rows = asset_table.getRows("active")
-    .filter(row => is_audio_ext(row.getData().extension));
-  if (checked) {
-    asset_table.selectRow(audio_rows);
-  } else {
-    asset_table.deselectRow(audio_rows);
-  }
-}
-
-function select_all_audio() {
-  set_audio_selection(true);
-}
-
-function deselect_all_audio() {
-  set_audio_selection(false);
-}
 
 // Generic progress poller used by all tasks except check_assets
 function get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete) {
