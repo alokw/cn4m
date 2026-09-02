@@ -20,6 +20,11 @@ let qc_config = { codecs: [], resolutions: {}, fps: [] };
 
 let asset_table = null;
 
+// Whether the "QC fails only" toggle is engaged. Kept as a programmatic filter
+// (addFilter/removeFilter), which ANDs with the header filters rather than
+// replacing them, so the toggle and the column filters compose.
+let qc_filter_active = false;
+
 // Extension groups, shared by the file-type icons and the audio-selection
 // helpers. Compared lowercase with any leading dot stripped.
 const AUDIO_EXTS = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
@@ -272,12 +277,44 @@ function version_formatter(cell) {
   return `<img src="/static/icons/${icon}" alt="${alt}" title="${title}" class="cell-icon"> ${escape_html(cell.getValue())}`;
 }
 
+// QC predicates. Shared by the cell formatters (which colour a single cell) and
+// by row_qc_fails (which stamps the row for the "QC fails only" filter), so the
+// red text and the filter can never disagree about what counts as a failure.
+
+function codec_fails(codec) {
+  return !!(qc_config.codecs.length && codec &&
+    !qc_config.codecs.includes(String(codec).toLowerCase()));
+}
+
+function fps_fails(framerate) {
+  if (framerate === "" || framerate === null || framerate === undefined) return false;
+  return !!(qc_config.fps.length &&
+    !qc_config.fps.some(allowed => Math.abs(parseFloat(framerate) - allowed) < 0.001));
+}
+
+// True when this row fails any QC rule — codec, resolution or framerate.
+function row_qc_fails(row) {
+  if (codec_fails(row.video_codec)) return true;
+  if (fps_fails(row.framerate)) return true;
+  const res = qc_resolution_fails(qc_resolution_rules(row.screen), row.width, row.height);
+  return res.w || res.h;
+}
+
+// Is any QC rule configured at all? With none, every row passes and the toggle
+// would be dead weight, so it gets hidden.
+function qc_rules_configured() {
+  const res = qc_config.resolutions || {};
+  return !!(qc_config.codecs.length || qc_config.fps.length ||
+    (res.global && res.global.length) ||
+    (res.screens && Object.keys(res.screens).length));
+}
+
 // Codec — red when QC_CODEC is configured and this codec isn't in the list.
 function codec_formatter(cell) {
   const codec = cell.getValue() || "";
-  const fail = qc_config.codecs.length && codec &&
-    !qc_config.codecs.includes(String(codec).toLowerCase());
-  return fail ? qc_span(codec, qc_config.codecs.join(", ")) : escape_html(codec);
+  return codec_fails(codec)
+    ? qc_span(codec, qc_config.codecs.join(", "))
+    : escape_html(codec);
 }
 
 // Width / Height — red on whichever dimension matches none of the rules for
@@ -298,9 +335,9 @@ function resolution_formatter(dimension) {
 function fps_formatter(cell) {
   const value = cell.getValue();
   const framerate = value === null || value === undefined ? "" : value;
-  const fail = qc_config.fps.length && framerate !== "" &&
-    !qc_config.fps.some(allowed => Math.abs(parseFloat(framerate) - allowed) < 0.001);
-  return fail ? qc_span(framerate, qc_config.fps.join(" or ")) : escape_html(framerate);
+  return fps_fails(framerate)
+    ? qc_span(framerate, qc_config.fps.join(" or "))
+    : escape_html(framerate);
 }
 
 // Free-text "contains" filter (case-insensitive).
@@ -390,7 +427,8 @@ function asset_columns() {
 // Flatten the scan result (keyed by fileid) into Tabulator's row array. Values
 // stay raw here — display formatting is the formatters' job.
 function asset_rows(assets_by_id) {
-  return Object.entries(assets_by_id).map(([fileid, asset]) => ({
+  return Object.entries(assets_by_id).map(([fileid, asset]) => {
+    const row = {
     fileid: fileid,
     parent: asset.parent || "",
     // display_name excludes screen/version/extension; older entries fall back
@@ -411,7 +449,10 @@ function asset_rows(assets_by_id) {
     audio_channels: asset.audio_channels,
     size: asset.size || "",
     size_bytes: asset.size_bytes,
-  }));
+    };
+    row.qc_fail = row_qc_fails(row);  // stamped once here; the toggle filters on it
+    return row;
+  });
 }
 
 // Build the table on the first scan; refresh its data on every scan after that
@@ -420,7 +461,7 @@ function render_asset_table(assets_by_id) {
   const rows = asset_rows(assets_by_id);
 
   if (asset_table) {
-    asset_table.replaceData(rows);
+    asset_table.replaceData(rows).then(update_qc_button);
     return;
   }
 
@@ -455,12 +496,55 @@ function render_asset_table(assets_by_id) {
 
   // Selection survives a filter change, so a row can be selected while hidden.
   // Show the count next to the action buttons to keep that honest.
+  asset_table.on("tableBuilt", update_qc_button);
   asset_table.on("rowSelectionChanged", () => update_selection_count());
   // dataFiltered is dispatched from *inside* Tabulator's filter routine, before
   // the filtered set is assigned to activeRows — so getRows("active") is one
   // filter-change stale in here. The event's second argument is the fresh set.
   asset_table.on("dataFiltered", (filters, rows) => update_selection_count(rows));
 }
+
+// ── QC fails filter ───────────────────────────────────────────────────────────
+
+function toggle_qc_filter() {
+  if (!asset_table) return;
+  set_qc_filter(!qc_filter_active);
+}
+
+function set_qc_filter(active) {
+  qc_filter_active = active;
+  if (active) {
+    asset_table.addFilter("qc_fail", "=", true);
+  } else {
+    asset_table.removeFilter("qc_fail", "=", true);
+  }
+  $('#toggle-qc').toggleClass('obx-button-active', active);
+}
+
+// Label carries the failure count, so a finished scan reports its QC state at a
+// glance without anyone having to click. Hidden entirely when no QC rules are
+// configured, disabled when the scan is clean.
+function update_qc_button() {
+  const button = $('#toggle-qc');
+  if (!asset_table) return;
+
+  if (!qc_rules_configured()) {
+    button.hide();
+    return;
+  }
+
+  const failing = asset_table.getData().filter(row => row.qc_fail).length;
+  button.show();
+
+  if (!failing) {
+    if (qc_filter_active) set_qc_filter(false);  // don't leave an empty table behind
+    button.text("NO QC FAILS").prop("disabled", true);
+    return;
+  }
+
+  button.text(`QC FAILS ONLY (${failing})`).prop("disabled", false);
+}
+
 
 // "12 selected" / "12 selected (3 hidden by filter)" / "" when nothing is picked.
 // active_rows may be supplied by a caller that has a fresher set than the table.

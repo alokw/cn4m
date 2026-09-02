@@ -31,6 +31,21 @@ body {
 	border: 1px solid #F99D38;
 }
 
+/* Engaged toggle (QC fails only) — state lives in the highlight, so the label
+   can keep describing what the button filters to. */
+.obx-button-active {
+	background-color: #4a3722;
+	border: 1px solid #F99D38;
+	color: #F99D38;
+}
+
+.obx-button:disabled,
+.obx-button:disabled:hover {
+	border: 1px solid #454545;
+	color: #6a6a6a;
+	cursor: default;
+}
+
 .obx-actionbutton {
 	/*background-color: #444444;*/
 	background-color: #3a3a3a;

@@ -43,6 +43,7 @@
             <div class="review-buttons" style="display:none; margin-left:auto;">
                 <button id="select-audio" class="obx-button">SELECT ALL AUDIO</button>
                 <button id="deselect-audio" class="obx-button" style="margin-left:0.5rem;">DE-SELECT ALL AUDIO</button>
+                <button id="toggle-qc" class="obx-button" style="margin-left:0.5rem;">QC FAILS ONLY</button>
             </div>
         </div>
         <div id="results"></div>
@@ -84,6 +85,7 @@ $(function() { $('#transcode-assets').click(transcode_assets); });
 $(function() { $('#quarantine-transcode-assets').click(quarantine_and_transcode); });
 $(function() { $('#select-audio').click(select_all_audio); });
 $(function() { $('#deselect-audio').click(deselect_all_audio); });
+$(function() { $('#toggle-qc').click(toggle_qc_filter); });
 $(load_ffmpeg_presets);
 $(load_qc_config);
 

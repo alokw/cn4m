@@ -203,7 +203,11 @@ Suggested commit: `style: match tabulator theme to cn4m dark ui`
     - Empty values are excluded from numeric filters. This needed an explicit guard: `Number(null)` and `Number("")` are both `0`, so an audio file with no width would otherwise have matched a `<1000` width filter. Caught by test, not by eye.
     - A partially typed filter (`>` alone, or junk) hides nothing rather than emptying the table mid-keystroke.
   - **Added a selection counter** next to the action buttons: selection survives a filter change, so a row can be selected while hidden. It reads `12 selected (3 hidden by filter)` when that happens — approve/quarantine move real files, so silent hidden selections were worth guarding against. Drop the `#selection_count` span and its two handlers if it's noise.
-- [ ] **QC filter:** stamp each row with a computed `qc_fail: true/false` during transform; add a "show failing only" toggle button next to the audio buttons.
+- [x] **QC filter** *(done — needs testing)*: rows are stamped with `qc_fail` during the transform; a **QC FAILS ONLY** toggle sits next to the audio buttons.
+  - Uses `addFilter`/`removeFilter` rather than `setFilter`, so the toggle **ANDs with the header filters** instead of wiping them — filter Ext to `mov`, then toggle QC, and both apply.
+  - Extracted `codec_fails()` / `fps_fails()` so the cell formatters and the row stamp share one definition of failure. Previously the red-cell logic lived inline in each formatter; had the filter re-implemented it, the two could have drifted apart silently. Tests assert formatter and predicate agree.
+  - **The label carries the count** — `QC FAILS ONLY (12)` — so a finished scan reports its QC state without anyone clicking. Reads `NO QC FAILS` and disables itself on a clean scan, and hides entirely when no QC rules are configured in `.env`.
+  - A stale toggle is cleared if a re-scan comes back clean, rather than leaving an empty table with no obvious cause.
 - [ ] **Persistence:** `persistence: {sort: true, filter: true, columns: true}` + `persistenceID: "cn4m-review"` (localStorage). Verify a stale persisted layout doesn't hide new columns.
 - [ ] **Spreadsheet feel:** `selectableRange`, `clipboard: true` for copy-out to Sheets/Excel. Confirm range-select doesn't fight row-selection checkboxes (Tabulator 6 supports both; test click interactions carefully).
 - [ ] **Export:** small DOWNLOAD CSV button (`table.download("csv", ...)`).
