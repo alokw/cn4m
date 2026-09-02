@@ -18,6 +18,10 @@ let qc_config = { codecs: [], resolutions: {}, fps: [] };
 
 let scan_assets = {};
 
+// The Tabulator instance for the review table, created on the first completed
+// scan and reused (via replaceData) on every scan after that.
+let asset_table = null;
+
 // Extension groups, shared by the file-type icons and the audio-selection
 // helpers. Compared lowercase with any leading dot stripped.
 const AUDIO_EXTS = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
@@ -28,9 +32,21 @@ function normalize_ext(ext) {
   return String(ext || "").toLowerCase().replace(/^\./, '');
 }
 
+function is_audio_ext(ext) {
+  return AUDIO_EXTS.includes(normalize_ext(ext));
+}
+
 // True if the given fileid belongs to an audio asset in the current scan.
 function is_audio_asset(fileid) {
-  return AUDIO_EXTS.includes(normalize_ext((scan_assets[fileid] || {}).extension));
+  return is_audio_ext((scan_assets[fileid] || {}).extension);
+}
+
+// Escape values that get interpolated into formatter HTML. Filenames and folder
+// names are user-supplied, so a stray < or & must not be parsed as markup.
+function escape_html(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function load_qc_config() {
@@ -121,8 +137,7 @@ function transcode_assets() {
     return;
   }
   ajax_post_transcode('/transcode_assets', selected, preset_name);
-  $('input[name="review_checkbox"]').prop('checked', false);
-  document.querySelector('th input[type="checkbox"]').checked = false;
+  if (asset_table) asset_table.deselectRow();
 }
 
 function quarantine_and_transcode() {
@@ -137,8 +152,7 @@ function quarantine_and_transcode() {
     return;
   }
   ajax_post_transcode('/quarantine_and_transcode', selected, preset_name);
-  $('input[name="review_checkbox"]').prop('checked', false);
-  document.querySelector('th input[type="checkbox"]').checked = false;
+  if (asset_table) asset_table.deselectRow();
   remove_assets_from_table(selected);
 }
 
@@ -203,6 +217,180 @@ function update_progress(status_task, status_url) {
 }
 
 
+// ── Review table (Tabulator) ──────────────────────────────────────────────────
+// Column definitions, formatters and sorters for the asset review table.
+// Formatters only affect *display*; sorting and filtering always run against the
+// underlying row data, which is why the raw size_bytes / duration_ms fields exist.
+
+// Red, tooltipped cell for a value that fails a QC rule.
+function qc_span(value, expected) {
+  return `<span class="qc-fail" title="Expected: ${escape_html(expected)}">${escape_html(value)}</span>`;
+}
+
+// Sort on a raw numeric field (size_bytes / duration_ms) while the column shows
+// its human-readable twin. Assets missing the field — images have no duration,
+// and entries scanned before those fields existed have neither — group at the
+// ascending end instead of throwing.
+function raw_number_sorter(field) {
+  return function(a, b, aRow, bRow) {
+    const av = Number(aRow.getData()[field]);
+    const bv = Number(bRow.getData()[field]);
+    const a_missing = !isFinite(av);
+    const b_missing = !isFinite(bv);
+    if (a_missing && b_missing) return 0;
+    if (a_missing) return -1;
+    if (b_missing) return 1;
+    return av - bv;
+  };
+}
+
+// Screen / Stem sorts audio files as a block ahead of everything else, then
+// alphabetically within each block (Tabulator flips the result for descending).
+function screen_sorter(a, b, aRow, bRow) {
+  const a_audio = is_audio_ext(aRow.getData().extension);
+  const b_audio = is_audio_ext(bRow.getData().extension);
+  if (a_audio !== b_audio) return a_audio ? -1 : 1;
+  return String(a || "").localeCompare(String(b || ""));
+}
+
+// Folder — spaces preserved so folder names don't visually collapse.
+function folder_formatter(cell) {
+  return escape_html(cell.getValue()).replace(/ /g, "&nbsp;");
+}
+
+// Name — prefixed with an audio/image/video icon when the extension is known.
+function name_formatter(cell) {
+  const ext = cell.getData().extension || "";
+  const icon = get_file_type_icon(ext);
+  const name = escape_html(cell.getValue());
+  if (!icon) return name;
+  return `<img src="/static/icons/${icon}" alt="${escape_html(ext)}" title="${escape_html(ext)}" class="cell-icon"> ${name}`;
+}
+
+// Version — green up-arrow when the basename matches an existing tracked or
+// untracked asset, orange plus when it is brand new.
+function version_formatter(cell) {
+  const up = cell.getData().is_version_up;
+  const icon = up ? "version_up.svg" : "new_file.svg";
+  const alt = up ? "version up" : "new file";
+  const title = up
+    ? "version up — basename matches an existing tracked/untracked asset"
+    : "new file — no matching basename in existing assets";
+  return `<img src="/static/icons/${icon}" alt="${alt}" title="${title}" class="cell-icon"> ${escape_html(cell.getValue())}`;
+}
+
+// Codec — red when QC_CODEC is configured and this codec isn't in the list.
+function codec_formatter(cell) {
+  const codec = cell.getValue() || "";
+  const fail = qc_config.codecs.length && codec &&
+    !qc_config.codecs.includes(String(codec).toLowerCase());
+  return fail ? qc_span(codec, qc_config.codecs.join(", ")) : escape_html(codec);
+}
+
+// Width / Height — red on whichever dimension matches none of the rules for
+// this asset's screen.
+function resolution_formatter(dimension) {
+  return function(cell) {
+    const row = cell.getData();
+    const value = cell.getValue();
+    const shown = value === null || value === undefined ? "" : value;
+    const rules = qc_resolution_rules(row.screen);
+    if (!qc_resolution_fails(rules, row.width, row.height)[dimension]) return escape_html(shown);
+    const expected = [...new Set(rules.map(r => r[dimension]))].join(" or ");
+    return qc_span(shown, expected);
+  };
+}
+
+// FPS — red when set and matching no allowed value (0.001 tolerance for floats).
+function fps_formatter(cell) {
+  const value = cell.getValue();
+  const framerate = value === null || value === undefined ? "" : value;
+  const fail = qc_config.fps.length && framerate !== "" &&
+    !qc_config.fps.some(allowed => Math.abs(parseFloat(framerate) - allowed) < 0.001);
+  return fail ? qc_span(framerate, qc_config.fps.join(" or ")) : escape_html(framerate);
+}
+
+function asset_columns() {
+  return [
+    { title: "Folder",        field: "parent",         formatter: folder_formatter },
+    { title: "Name",          field: "name",           formatter: name_formatter },
+    { title: "Screen / Stem", field: "screen",         sorter: screen_sorter },
+    { title: "Version",       field: "version",        formatter: version_formatter, sorter: "alphanum" },
+    { title: "Ext",           field: "extension" },
+    { title: "Duration",      field: "duration",       sorter: raw_number_sorter("duration_ms") },
+    { title: "Codec",         field: "video_codec",    formatter: codec_formatter },
+    { title: "Width",         field: "width",          formatter: resolution_formatter("w"), sorter: "number" },
+    { title: "Height",        field: "height",         formatter: resolution_formatter("h"), sorter: "number" },
+    { title: "FPS",           field: "framerate",      formatter: fps_formatter,             sorter: "number" },
+    { title: "Audio",         field: "audio" },
+    { title: "Rate",          field: "audio_rate",     sorter: "number" },
+    { title: "Bits",          field: "audio_bits",     sorter: "number" },
+    { title: "Ch",            field: "audio_channels", sorter: "number" },
+    { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes") },
+  ];
+}
+
+// Flatten the scan result (keyed by fileid) into Tabulator's row array. Values
+// stay raw here — display formatting is the formatters' job.
+function asset_rows(assets_by_id) {
+  return Object.entries(assets_by_id).map(([fileid, asset]) => ({
+    fileid: fileid,
+    parent: asset.parent || "",
+    // display_name excludes screen/version/extension; older entries fall back
+    name: asset.display_name || asset.basename || asset.name || "",
+    screen: asset.screen || "",
+    version: asset.version || "",
+    is_version_up: !!asset.is_version_up,
+    extension: asset.extension || "",
+    duration: asset.duration || "",
+    duration_ms: asset.duration_ms,
+    video_codec: asset.video_codec || "",
+    width: asset.width,
+    height: asset.height,
+    framerate: asset.framerate,
+    audio: asset.audio || "",
+    audio_rate: asset.audio_rate,
+    audio_bits: asset.audio_bits,
+    audio_channels: asset.audio_channels,
+    size: asset.size || "",
+    size_bytes: asset.size_bytes,
+  }));
+}
+
+// Build the table on the first scan; refresh its data on every scan after that
+// (which keeps the user's column widths and, later, their filters).
+function render_asset_table(assets_by_id) {
+  const rows = asset_rows(assets_by_id);
+
+  if (asset_table) {
+    asset_table.replaceData(rows);
+    return;
+  }
+
+  asset_table = new Tabulator("#results", {
+    data: rows,
+    index: "fileid",              // lets deleteRow() address rows by fileid
+    columns: asset_columns(),
+    layout: "fitDataFill",
+    maxHeight: "75vh",            // long scans scroll inside the table (virtual DOM)
+    placeholder: "No new assets found.",
+    selectableRows: true,
+    columnDefaults: { headerHozAlign: "left", vertAlign: "middle" },
+    rowHeader: {
+      formatter: "rowSelection",
+      titleFormatter: "rowSelection",
+      headerSort: false,
+      resizable: false,
+      frozen: true,
+      width: 40,
+      hozAlign: "center",
+      headerHozAlign: "center",
+      cellClick: function(e, cell) { cell.getRow().toggleSelect(); },
+    },
+  });
+}
+
+
 // ── check_assets progress + table rendering ───────────────────────────────────
 // Polls the task status endpoint and, once complete, builds the sortable asset table.
 
@@ -226,127 +414,15 @@ function handle_check_assets_progress(status_task, status_url) {
     } else if (data['status'] == 'COMPLETE') {
         message = "Asset Check Complete"
 
-        // ── Build sortable results table ───────────────────────────────────────
-        let asset_table = `
-            <div class="table-responsive">
-                <table id="sortableTable" class="table table-dark table-striped table-hover table-sm fs-8 fw-lighter">
-                    <thead>
-                        <tr>
-                            <th class="pr-4 py-1"><input type="checkbox" onClick="toggle_checkboxes(this)" /></th>
-                            <th class="pr-4" data-type="string">Folder</th>
-                            <th class="pr-4" data-type="string">Name</th>
-                            <th class="pr-4" data-type="string">Screen / Stem</th>
-                            <th class="pr-4" data-type="string">Version</th>
-                            <th class="pr-4" data-type="string">Ext</th>
-                            <th class="pr-4" data-type="number">Duration</th>
-                            <th class="pr-4" data-type="string">Codec</th>
-                            <th class="pr-4" data-type="number">Width</th>
-                            <th class="pr-4" data-type="number">Height</th>
-                            <th class="pr-4" data-type="number">FPS</th>
-                            <th class="pr-4" data-type="string">Audio</th>
-                            <th class="pr-4" data-type="number">Rate</th>
-                            <th class="pr-4" data-type="number">Bits</th>
-                            <th class="pr-4" data-type="number">Ch</th>
-                            <th class="pr-4" data-type="string">Size</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-        // Sort results by dumbpath (case-insensitive parent.filename) before rendering
+        // Sort by dumbpath (case-insensitive parent.filename), stash the scan, render
         const data_sorted = Object.fromEntries(
             Object.entries(data['result']['assets']).sort((a, b) =>
                 (a[1]?.dumbpath || "").localeCompare(b[1]?.dumbpath || "")
             )
         );
         data['result']['assets'] = data_sorted;
-        scan_assets = data_sorted;  // source of truth for selection / removal below
-
-        // Build one table row per asset
-        for (const [key, value] of Object.entries(data['result']['assets'])) {
-            obj = data['result']['assets'][key];
-            fileid = key;
-            name = obj['display_name'] || obj['basename'] || obj['name'] || "";  // display_name excludes screen, version + extension; falls back for pre-display_name entries
-            version = obj['version'] || "";
-            extension = obj['extension'] || "";
-            // Prepend an icon next to the version:
-            //   green up-arrow (version_up.svg) if basename matches an existing tracked/untracked asset
-            //   orange plus   (new_file.svg)   otherwise — treated as a brand-new asset
-            const version_icon = obj['is_version_up']
-                ? `<img src="/static/icons/version_up.svg" alt="version up" title="version up — basename matches an existing tracked/untracked asset" style="height: 1em; vertical-align: middle;">`
-                : `<img src="/static/icons/new_file.svg" alt="new file" title="new file — no matching basename in existing assets" style="height: 1em; vertical-align: middle;">`;
-            const version_cell = `${version_icon} ${version}`;
-
-            // Prepend a file-type icon (audio / image / video) to the name, if we recognize the extension
-            const ext_icon_file = get_file_type_icon(extension);
-            const name_cell = ext_icon_file
-                ? `<img src="/static/icons/${ext_icon_file}" alt="${extension}" title="${extension}" style="height: 1em; vertical-align: middle;"> ${name}`
-                : name;
-            parent = (obj['parent'] || "").replace(/ /g, '&nbsp;');  // preserve folder name spaces in HTML
-            screen = obj['screen'] || "";
-            duration = obj['duration'] || "";
-            video_codec = obj['video_codec'] || "";
-            width = obj['width'] || "";
-            height = obj['height'] || "";
-            framerate = obj['framerate'] || "";
-            audio = obj['audio'] || "";
-            audio_rate = obj['audio_rate'] || "";
-            audio_bits = obj['audio_bits'] || "";
-            audio_channels = obj['audio_channels'] || "";
-            size = obj['size'] || "";
-
-            // ── QC checks ─────────────────────────────────────────────────────
-            // Codec: red if QC_CODEC is configured and this asset's codec isn't in the list
-            const codec_fail = qc_config.codecs.length && video_codec &&
-                !qc_config.codecs.includes(video_codec.toLowerCase());
-            const codec_cell = codec_fail
-                ? `<span style="color:#f87171" title="Expected: ${qc_config.codecs.join(', ')}">${video_codec}</span>`
-                : video_codec;
-
-            // Resolution: red on the dimension(s) that match none of the applicable rules
-            const qc_rules = qc_resolution_rules(screen);
-            const res_fail = qc_resolution_fails(qc_rules, width, height);
-            const expected_w = [...new Set(qc_rules.map(r => r.w))].join(' or ');
-            const expected_h = [...new Set(qc_rules.map(r => r.h))].join(' or ');
-            const width_cell  = res_fail.w ? `<span style="color:#f87171" title="Expected: ${expected_w}">${width}</span>`  : width;
-            const height_cell = res_fail.h ? `<span style="color:#f87171" title="Expected: ${expected_h}">${height}</span>` : height;
-
-            // FPS: red if set and asset framerate doesn't match any allowed value (within 0.001 for float precision)
-            const fps_fail = qc_config.fps.length && framerate !== "" &&
-                !qc_config.fps.some(allowed => Math.abs(parseFloat(framerate) - allowed) < 0.001);
-            const fps_cell = fps_fail
-                ? `<span style="color:#f87171" title="Expected: ${qc_config.fps.join(' or ')}">${framerate}</span>`
-                : framerate;
-
-            // Row id = fileid (no # prefix) so remove_assets_from_table can find it by getElementById
-            asset_table += `
-                <tr id="${fileid}" class="even:bg-zinc-800 odd:bg-zinc-900 text-slate-300 hover:bg-zinc-700">
-                    <td class="pr-4 py-1"><input class="obx-checkbox" name="review_checkbox" type="checkbox" value="${fileid}"></td>
-                    <td class="pr-4">${parent}</td>
-                    <td class="pr-4">${name_cell}</td>
-                    <td class="pr-4">${screen}</td>
-                    <td class="pr-4">${version_cell}</td>
-                    <td class="pr-4">${extension}</td>
-                    <td class="pr-4">${duration}</td>
-                    <td class="pr-4">${codec_cell}</td>
-                    <td class="pr-4">${width_cell}</td>
-                    <td class="pr-4">${height_cell}</td>
-                    <td class="pr-4">${fps_cell}</td>
-                    <td class="pr-4">${audio}</td>
-                    <td class="pr-4">${audio_rate}</td>
-                    <td class="pr-4">${audio_bits}</td>
-                    <td class="pr-4">${audio_channels}</td>
-                    <td class="pr-4">${size}</td>
-                </tr>`;
-        }
-
-        asset_table += `
-            </tbody>
-            </table>
-        </div>`;
-
-        // Insert the table into the DOM, then attach sort listeners
-        $('#results').html(asset_table);
-        makeTableSortable();
+        scan_assets = data_sorted;  // source of truth for selection / removal
+        render_asset_table(data_sorted);
         $('#review-actions').show();
         $('.review-buttons').show();
 
@@ -456,12 +532,15 @@ function get_file_type_icon(ext) {
 // Check or uncheck every audio row, deciding audio-ness from the scan data
 // rather than from the rendered Ext column.
 function set_audio_selection(checked) {
-  var boxes = document.getElementsByName('review_checkbox');
-  for (var i = 0; i < boxes.length; i++) {
-    if (is_audio_asset(boxes[i].value)) boxes[i].checked = checked;
+  if (!asset_table) return;
+  // "active" = rows currently passing any filters, so this stays correct in Phase 6
+  const audio_rows = asset_table.getRows("active")
+    .filter(row => is_audio_ext(row.getData().extension));
+  if (checked) {
+    asset_table.selectRow(audio_rows);
+  } else {
+    asset_table.deselectRow(audio_rows);
   }
-  var header_box = document.querySelector('th input[type="checkbox"]');
-  if (header_box) header_box.checked = false;
 }
 
 function select_all_audio() {
@@ -512,21 +591,17 @@ function get_update_progress_feedback(status_task, status_url, msg_destination, 
 
 // Return an array of fileid values for all checked rows
 function get_selected_assets() {
-  selected_assets = []
-  $("input[name='review_checkbox']:checkbox:checked").each(function (index, obj) {
-    selected_assets.push($(this).val());
-  });
-  return selected_assets
+  if (!asset_table) return [];
+  return asset_table.getSelectedData().map(row => row.fileid);
 }
 
 // Remove rows from the table by fileid after approve/quarantine
 function remove_assets_from_table(assets) {
-    for (const asset of assets) {
-      var row = document.getElementById(asset);
-      if (row) row.parentNode.removeChild(row);
-      delete scan_assets[asset];  // keep the store in step with the table
-    }
+  for (const asset of assets) {
+    if (asset_table && asset_table.getRow(asset)) asset_table.deleteRow(asset);
+    delete scan_assets[asset];  // keep the store in step with the table
   }
+}
 
 // POST to a URL with no payload; used for check_assets, track_assets, clear_flags
 function ajax_post_simple(url) {

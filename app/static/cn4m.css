@@ -95,3 +95,15 @@ body {
 .severity-warn {
   color: yellow;
 }
+/* ── Review table (Tabulator) ────────────────────────────────────────────────
+   Minimal rules needed for the table to render correctly; the full theme pass
+   that matches Tabulator to the cn4m dark UI comes later. */
+
+.qc-fail {
+	color: #f87171;
+}
+
+.cell-icon {
+	height: 1em;
+	vertical-align: middle;
+}

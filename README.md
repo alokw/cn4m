@@ -241,6 +241,11 @@ Then restart Docker Desktop.
 - If you changed `WORKSPACE_FOLDER` recently, run `docker compose down && docker compose up -d` — a restart alone won't remount the volume.
 - Run `docker compose logs worker` to see if there are any errors during the scan.
 
+**Edits to the UI aren't showing up**
+- **JavaScript / CSS** (`app/static/`) are read from disk on every request — a browser hard-refresh (`Ctrl`/`Cmd`+`Shift`+`R`) is enough.
+- **Templates** (`app/templates/*.html`) are compiled and cached by Jinja. `TEMPLATES_AUTO_RELOAD` is enabled in `app/__init__.py` so template edits are also picked up on refresh; without it you would need `docker compose restart web` after every HTML change.
+- **On debug mode:** Flask's `FLASK_ENV` variable was removed in Flask 2.3 and silently does nothing on modern versions, so it has been dropped from `docker-compose.yaml`. This project therefore runs with debug **off** — no interactive debugger and no automatic template reloading beyond the config flag above. To turn debug on for development, add `--debug` to the `flask run` command in `docker-compose.yaml`. Leave it off for anything internet-facing: the debugger allows arbitrary code execution.
+
 **Google Sheets push fails**
 - Confirm the service account email has Editor access to the sheet.
 - Check that `GOOGLE_CREDS` in `.env` contains valid JSON on a single line.

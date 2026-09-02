@@ -13,7 +13,6 @@ services:
       - /etc/timezone:/etc/timezone:ro
     environment:
       - FLASK_APP=run.py
-      - FLASK_ENV=development
       - FLASK_RUN_HOST=0.0.0.0
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0

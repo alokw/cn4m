@@ -113,31 +113,30 @@ Suggested commit: `feat: store raw size_bytes and duration_ms for sorting`
 
 ---
 
-## Phase 3 — Swap the table rendering
+## Phase 3 — Swap the table rendering *(code done — needs FULL CYCLE)*
 
-The core phase. Replace the ~115-line template string + `makeTableSortable()` with a Tabulator instance.
+- [x] `asset_rows()` flattens the scan dict into Tabulator's row array, keeping values **raw** (`display_name || basename || name` fallback preserved).
+- [x] `render_asset_table()` builds the table on the first scan and calls `replaceData()` on later scans, so column widths (and Phase 6 filters) survive a re-scan.
+- [x] Table config: `index: "fileid"`, `layout: "fitDataFill"`, `selectableRows: true`, `rowHeader` checkbox column (frozen, 40px), `placeholder: "No new assets found."`.
+- [x] Formatters ported unchanged in behaviour: file-type icon on Name, version-up/new-file icon on Version, QC red on Codec / Width / Height / FPS via a `.qc-fail` class instead of inline styles, `&nbsp;` folder spacing.
+- [x] **Bug #1 (Duration) and #2 (Size) fixed** — `raw_number_sorter()` sorts on `duration_ms` / `size_bytes` while the column displays the human-readable value. **Bug #3 (Version)** fixed with `sorter: "alphanum"`.
+- [x] Rewired to the Tabulator API: `get_selected_assets` → `getSelectedData()`, `remove_assets_from_table` → `deleteRow()` (guarded by `getRow()` so an already-removed row is a no-op), `set_audio_selection` → `selectRow`/`deselectRow` over `getRows("active")`, transcode resets → `deselectRow()`.
+- [x] Added `escape_html()` and applied it to every formatter — filenames and folder names are user-supplied and were previously interpolated straight into markup.
+- [x] Minimal `.qc-fail` / `.cell-icon` CSS added; full theming is Phase 5.
 
-- [ ] Transform `scan_assets` dict → array of row objects (`{fileid, parent, display_name, screen, version, is_version_up, extension, duration, video_codec, width, height, framerate, audio, audio_rate, audio_bits, audio_channels, size, dumbpath}`). Keep values **raw** — formatters handle display.
-- [ ] Build `new Tabulator("#results", {...})` with best-practice config:
-  - `data:` the array, `index: "fileid"` (so `deleteRow(fileid)` works),
-  - `layout: "fitDataFill"`, `initialSort: [{column: "dumbpath", dir: "asc"}]` (or sort the array pre-load),
-  - selection via `rowHeader: {formatter: "rowSelection", titleFormatter: "rowSelection", headerSort: false}`.
-- [ ] Column definitions:
-  - Name: formatter prepends file-type icon from `row.getData().extension` (not from cell text); sorter uses raw `display_name`.
-  - Version: formatter prepends version-up/new-file icon from `is_version_up`; sorter on raw `version`.
-  - Codec / Width / Height / FPS: formatters apply the existing QC logic (`qc_config`, `qc_resolution_rules`, `qc_resolution_fails` port over unchanged) — add a css class (e.g. `qc-fail`) + tooltip instead of inline styles.
-  - Size **and Duration** (bugs #1/#2): **backend half already done** — `size_bytes` and `duration_ms` are now written by `check_asset` (see Phase 2.5 below). Remaining frontend work: columns display `size`/`duration` via `formatter` but sort on the raw field (`sorter: "number"` against `size_bytes` / `duration_ms`). Confirm image-only files and pre-existing `assets.json` entries — both of which lack the raw fields — sort to one end rather than throwing.
-  - Version (bug #3): `sorter: "alphanum"` so `v9` < `v10`.
-  - Screen / Stem: custom sorter reproducing audio-first ordering using `row.getData().extension`.
-  - Numeric columns: `sorter: "number"`.
-- [ ] Rewire actions to the Tabulator API:
-  - `get_selected_assets()` → `table.getSelectedData().map(r => r.fileid)`,
-  - `remove_assets_from_table(ids)` → `table.deleteRow(ids)` (+ prune `scan_assets`),
-  - select/deselect-all-audio → `table.selectRow(table.getRows().filter(r => AUDIO_EXTS.includes(...)))` / `deselectRow(...)`,
-  - post-transcode "uncheck everything" → `table.deselectRow()`.
-- [ ] Keep the flags panel logic untouched.
+**Automated checks:** 32 assertions pass — row transform and name fallbacks, both sort-bug fixes, missing raw fields sorting to one end without throwing, audio-block screen sort, every QC formatter (pass / fail / empty, per-screen resolution rules, float FPS tolerance), icon selection, folder spacing, and HTML escaping of markup in filenames.
 
-**Test:** FULL CYCLE, plus specifically: Size now sorts by magnitude across KB/MB/GB; Version sorts by version value; re-running START replaces the table cleanly (call `table.destroy()` or `setData` on re-scan — pick one and verify no duplicate tables/listeners). Commit: `feat: render review table with tabulator`.
+**Test:** FULL CYCLE. Specifically:
+- **Duration and Size now sort correctly** — previously Duration did nothing and Size sorted alphabetically.
+- Re-run START twice: the table should refresh, not stack or duplicate.
+- Approve/quarantine a row, then re-scan — no ghost rows.
+- SELECT ALL AUDIO, then approve, and confirm the right files moved.
+
+**Two judgement calls to review:**
+1. `maxHeight: "75vh"` — long scans now scroll *inside* the table (and get virtual rendering) rather than the page growing. One line to remove if you'd rather the page scroll.
+2. The old table's Bootstrap classes (`table-dark table-striped table-sm fs-8`) are gone; Tabulator's midnight theme is in charge until Phase 5, so **expect the styling to look off** — that's the next phase, not a regression.
+
+Suggested commit: `feat: render review table with tabulator`
 
 ---
 
