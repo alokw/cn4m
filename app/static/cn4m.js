@@ -10,6 +10,29 @@
 
 let qc_config = { codecs: [], resolutions: {}, fps: [] };
 
+
+// ── Scan data store ───────────────────────────────────────────────────────────
+// The most recent scan result, keyed by fileid. This is the source of truth for
+// everything downstream — selection, filtering, row removal — so those features
+// read asset values from here rather than scraping text back out of table cells.
+
+let scan_assets = {};
+
+// Extension groups, shared by the file-type icons and the audio-selection
+// helpers. Compared lowercase with any leading dot stripped.
+const AUDIO_EXTS = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
+const IMAGE_EXTS = ["png", "jpeg", "jpg", "tiff", "tif", "tga", "exr", "bmp", "gif", "webp", "dpx", "heic"];
+const VIDEO_EXTS = ["mov", "mkv", "mp4", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg"];
+
+function normalize_ext(ext) {
+  return String(ext || "").toLowerCase().replace(/^\./, '');
+}
+
+// True if the given fileid belongs to an audio asset in the current scan.
+function is_audio_asset(fileid) {
+  return AUDIO_EXTS.includes(normalize_ext((scan_assets[fileid] || {}).extension));
+}
+
 function load_qc_config() {
   $.getJSON('/qc_config', function(data) {
     qc_config = data;
@@ -236,6 +259,7 @@ function handle_check_assets_progress(status_task, status_url) {
             )
         );
         data['result']['assets'] = data_sorted;
+        scan_assets = data_sorted;  // source of truth for selection / removal below
 
         // Build one table row per asset
         for (const [key, value] of Object.entries(data['result']['assets'])) {
@@ -378,10 +402,7 @@ function makeTableSortable() {
         header.addEventListener("click", () => {
             const dataType = header.getAttribute("data-type") || "string";
             const isScreenCol = header.textContent.trim() === "Screen / Stem";
-            const extColIndex = isScreenCol ? Array.from(headers).findIndex(h => h.textContent.trim() === "Ext") : -1;
             let rowsArray = Array.from(tbody.querySelectorAll("tr"));
-
-            const audioExts = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
 
             rowsArray.sort((rowA, rowB) => {
                 let cellA = rowA.children[colIndex]?.innerText.trim() || "";
@@ -389,11 +410,10 @@ function makeTableSortable() {
 
                 let comparison = 0;
 
-                if (isScreenCol && extColIndex >= 0) {
-                    const extA = (rowA.children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
-                    const extB = (rowB.children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
-                    const isAudioA = audioExts.includes(extA);
-                    const isAudioB = audioExts.includes(extB);
+                if (isScreenCol) {
+                    // Row id is the fileid, so audio-ness comes from the scan data
+                    const isAudioA = is_audio_asset(rowA.id);
+                    const isAudioB = is_audio_asset(rowB.id);
                     if (isAudioA !== isAudioB) {
                         comparison = isAudioA ? -1 : 1;
                     } else {
@@ -422,56 +442,34 @@ function makeTableSortable() {
 // Map a file extension to its file-type icon filename, or null if unknown.
 // Extensions are matched case-insensitively.
 function get_file_type_icon(ext) {
-  if (!ext) return null;
-  const lower = String(ext).toLowerCase().replace(/^\./, '');
-  const audio = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
-  const image = ["png", "jpeg", "jpg", "tiff", "tif", "tga", "exr", "bmp", "gif", "webp", "dpx", "heic"];
-  const video = ["mov", "mkv", "mp4", "avi", "webm", "m4v", "wmv", "flv", "mpg", "mpeg"];
-  if (audio.includes(lower)) return "audio_file.svg";
-  if (image.includes(lower)) return "image_file.svg";
-  if (video.includes(lower)) return "video_file.svg";
+  const lower = normalize_ext(ext);
+  if (!lower) return null;
+  if (AUDIO_EXTS.includes(lower)) return "audio_file.svg";
+  if (IMAGE_EXTS.includes(lower)) return "image_file.svg";
+  if (VIDEO_EXTS.includes(lower)) return "video_file.svg";
   return null;
 }
 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function select_all_audio() {
-  var audioExts = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
-  var table = document.getElementById("sortableTable");
-  if (!table) return;
-  var headers = table.querySelectorAll("thead th");
-  var extColIndex = Array.from(headers).findIndex(h => h.textContent.trim() === "Ext");
-  if (extColIndex < 0) return;
-
-  var rows = table.querySelectorAll("tbody tr");
-  for (var i = 0; i < rows.length; i++) {
-    var ext = (rows[i].children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
-    var checkbox = rows[i].querySelector("input[name='review_checkbox']");
-    if (checkbox && audioExts.includes(ext)) {
-      checkbox.checked = true;
-    }
+// Check or uncheck every audio row, deciding audio-ness from the scan data
+// rather than from the rendered Ext column.
+function set_audio_selection(checked) {
+  var boxes = document.getElementsByName('review_checkbox');
+  for (var i = 0; i < boxes.length; i++) {
+    if (is_audio_asset(boxes[i].value)) boxes[i].checked = checked;
   }
-  document.querySelector('th input[type="checkbox"]').checked = false;
+  var header_box = document.querySelector('th input[type="checkbox"]');
+  if (header_box) header_box.checked = false;
+}
+
+function select_all_audio() {
+  set_audio_selection(true);
 }
 
 function deselect_all_audio() {
-  var audioExts = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
-  var table = document.getElementById("sortableTable");
-  if (!table) return;
-  var headers = table.querySelectorAll("thead th");
-  var extColIndex = Array.from(headers).findIndex(h => h.textContent.trim() === "Ext");
-  if (extColIndex < 0) return;
-
-  var rows = table.querySelectorAll("tbody tr");
-  for (var i = 0; i < rows.length; i++) {
-    var ext = (rows[i].children[extColIndex]?.innerText.trim() || "").toLowerCase().replace(/^\./, '');
-    var checkbox = rows[i].querySelector("input[name='review_checkbox']");
-    if (checkbox && audioExts.includes(ext)) {
-      checkbox.checked = false;
-    }
-  }
-  document.querySelector('th input[type="checkbox"]').checked = false;
+  set_audio_selection(false);
 }
 
 // Toggle all review checkboxes on/off using the header checkbox
@@ -526,6 +524,7 @@ function remove_assets_from_table(assets) {
     for (const asset of assets) {
       var row = document.getElementById(asset);
       if (row) row.parentNode.removeChild(row);
+      delete scan_assets[asset];  // keep the store in step with the table
     }
   }
 

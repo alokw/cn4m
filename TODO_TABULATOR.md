@@ -52,16 +52,23 @@ Referred to below as **FULL CYCLE**:
 
 ---
 
-## Phase 1 — Decouple data from the DOM (no visual change)
+## Phase 1 — Decouple data from the DOM *(code done — needs FULL CYCLE)*
 
-The table currently *is* the data store. Fix that first so the Tabulator swap is mechanical.
+The table currently *is* the data store. Fixed that first so the Tabulator swap is mechanical.
 
-- [ ] In `cn4m.js`, add a module-level store: `let scan_assets = {};` (keyed by fileid), populated in `handle_check_assets_progress` from `data['result']['assets']`.
-- [ ] `select_all_audio` / `deselect_all_audio`: decide audio-ness from `scan_assets[fileid].extension` (reuse `get_file_type_icon`-style ext lists — consolidate the three duplicated `audioExts` arrays into one shared const) instead of scraping the Ext column by header text.
-- [ ] `remove_assets_from_table`: also `delete scan_assets[fileid]`.
-- [ ] `get_selected_assets` can stay checkbox-based for now (still returns fileids).
+- [x] Module-level `scan_assets = {}` in `cn4m.js`, assigned from the sorted scan result in `handle_check_assets_progress`.
+- [x] Consolidated the **four** duplicated extension arrays into shared `AUDIO_EXTS` / `IMAGE_EXTS` / `VIDEO_EXTS` consts plus a `normalize_ext()` helper (lowercases, strips a leading dot).
+- [x] `select_all_audio` / `deselect_all_audio` collapsed into one `set_audio_selection(checked)` that reads `scan_assets[fileid].extension` via `is_audio_asset()`, instead of locating the Ext column by header text and scraping cell text.
+- [x] The Screen / Stem audio-first sort now also uses `is_audio_asset(row.id)` (row id *is* the fileid), removing the last header-text column lookup — bug #4 is gone.
+- [x] `remove_assets_from_table` prunes `scan_assets` alongside the DOM row.
+- [x] `get_selected_assets` left checkbox-based (still returns fileids) — it becomes `getSelectedData()` in Phase 3.
+- [x] Guarded the header-checkbox reset against `null` (it threw if no table was rendered yet).
 
-**Test:** FULL CYCLE — behavior must be *identical* to before. Commit: `refactor: keep scan results in JS data store instead of DOM`.
+**Automated check:** 18 assertions pass against a stubbed DOM — extension normalization (case + leading dot), icon mapping, `is_audio_asset` for unknown fileids and assets with no extension, select-audio touching only audio rows, deselect-audio preserving non-audio selections, and row removal keeping DOM and store in step. Harness kept in the scratchpad, not committed.
+
+**Test:** FULL CYCLE — behavior must be *identical* to before. Pay attention to: SELECT ALL AUDIO after sorting by a few different columns, and deselect-audio when video rows are also selected (they must stay selected).
+
+Suggested commit: `refactor: keep scan results in a JS data store instead of the DOM`
 
 ---
 
@@ -75,7 +82,7 @@ The table currently *is* the data store. Fix that first so the Tabulator swap is
 
 ---
 
-## Phase 2.5 — Raw sort fields in the backend *(done — needs testing)*
+## Phase 2.5 — Raw sort fields in the backend *(done — verified in `assets.json`)*
 
 Pulled forward from Phase 3 because it's independent of Tabulator and fixes bugs #1/#2 at the source.
 
