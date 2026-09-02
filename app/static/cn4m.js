@@ -1,7 +1,7 @@
 // cn4m.js
 // Frontend logic for the cn4m asset conformance tool.
-// Handles AJAX calls to the Flask backend, Celery task progress polling,
-// dynamic table rendering, column sorting, and checkbox selection.
+// Handles AJAX calls to the Flask backend, Celery task progress polling, and
+// the Tabulator review table (columns, QC formatting, selection).
 
 
 // ── QC config ─────────────────────────────────────────────────────────────────
@@ -11,15 +11,13 @@
 let qc_config = { codecs: [], resolutions: {}, fps: [] };
 
 
-// ── Scan data store ───────────────────────────────────────────────────────────
-// The most recent scan result, keyed by fileid. This is the source of truth for
-// everything downstream — selection, filtering, row removal — so those features
-// read asset values from here rather than scraping text back out of table cells.
+// ── Review table state ────────────────────────────────────────────────────────
+// The Tabulator instance is the single source of truth for scan data: rows hold
+// the asset objects, so selection, sorting, filtering and row removal all read
+// from the table rather than scraping values back out of the rendered cells.
+// Created on the first completed scan, reused (via replaceData) on every scan
+// after that.
 
-let scan_assets = {};
-
-// The Tabulator instance for the review table, created on the first completed
-// scan and reused (via replaceData) on every scan after that.
 let asset_table = null;
 
 // Extension groups, shared by the file-type icons and the audio-selection
@@ -34,11 +32,6 @@ function normalize_ext(ext) {
 
 function is_audio_ext(ext) {
   return AUDIO_EXTS.includes(normalize_ext(ext));
-}
-
-// True if the given fileid belongs to an audio asset in the current scan.
-function is_audio_asset(fileid) {
-  return is_audio_ext((scan_assets[fileid] || {}).extension);
 }
 
 // Escape values that get interpolated into formatter HTML. Filenames and folder
@@ -312,9 +305,9 @@ function fps_formatter(cell) {
 
 function asset_columns() {
   return [
-    { title: "Folder",        field: "parent",         formatter: folder_formatter },
-    { title: "Name",          field: "name",           formatter: name_formatter },
-    { title: "Screen / Stem", field: "screen",         sorter: screen_sorter },
+    { title: "Folder",        field: "parent",         formatter: folder_formatter, maxInitialWidth: 260 },
+    { title: "Name",          field: "name",           formatter: name_formatter,   maxInitialWidth: 340 },
+    { title: "Screen / Stem", field: "screen",         sorter: screen_sorter,       maxInitialWidth: 180 },
     { title: "Version",       field: "version",        formatter: version_formatter, sorter: "alphanum" },
     { title: "Ext",           field: "extension" },
     { title: "Duration",      field: "duration",       sorter: raw_number_sorter("duration_ms") },
@@ -326,7 +319,7 @@ function asset_columns() {
     { title: "Rate",          field: "audio_rate",     sorter: "number" },
     { title: "Bits",          field: "audio_bits",     sorter: "number" },
     { title: "Ch",            field: "audio_channels", sorter: "number" },
-    { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes") },
+    { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes"), minWidth: 90 },
   ];
 }
 
@@ -371,7 +364,11 @@ function render_asset_table(assets_by_id) {
     data: rows,
     index: "fileid",              // lets deleteRow() address rows by fileid
     columns: asset_columns(),
-    layout: "fitDataFill",
+    // fitDataStretch is the only fitData variant whose layout function respects
+    // a manually resized column (`e.widthFixed || e.reinitializeWidth()`); the
+    // others call reinitializeWidth() unconditionally, which clears the fixed
+    // flag and snaps the column back to whatever its longest value needs.
+    layout: "fitDataStretch",
     maxHeight: "75vh",            // long scans scroll inside the table (virtual DOM)
     placeholder: "No new assets found.",
     selectableRows: true,
@@ -421,7 +418,6 @@ function handle_check_assets_progress(status_task, status_url) {
             )
         );
         data['result']['assets'] = data_sorted;
-        scan_assets = data_sorted;  // source of truth for selection / removal
         render_asset_table(data_sorted);
         $('#review-actions').show();
         $('.review-buttons').show();
@@ -454,64 +450,6 @@ function handle_check_assets_progress(status_task, status_url) {
 
     $('#check_asset_progress').html(message);
   });
-}
-
-
-// ── Table sorting ─────────────────────────────────────────────────────────────
-// Makes all header cells (except the checkbox column) clickable to sort the table.
-// Toggles between ascending and descending on repeated clicks.
-// Columns marked data-type="number" sort numerically; others sort alphabetically.
-
-function makeTableSortable() {
-    const table = document.getElementById("sortableTable");
-    if (!table) return;
-
-    const headers = table.querySelectorAll("thead th");
-    const tbody = table.querySelector("tbody");
-    let sortOrder = {};  // tracks current sort direction per column index
-
-    headers.forEach((header, colIndex) => {
-        if (colIndex === 0) return;  // skip the checkbox column
-
-        header.style.cursor = "pointer";
-
-        header.addEventListener("click", () => {
-            const dataType = header.getAttribute("data-type") || "string";
-            const isScreenCol = header.textContent.trim() === "Screen / Stem";
-            let rowsArray = Array.from(tbody.querySelectorAll("tr"));
-
-            rowsArray.sort((rowA, rowB) => {
-                let cellA = rowA.children[colIndex]?.innerText.trim() || "";
-                let cellB = rowB.children[colIndex]?.innerText.trim() || "";
-
-                let comparison = 0;
-
-                if (isScreenCol) {
-                    // Row id is the fileid, so audio-ness comes from the scan data
-                    const isAudioA = is_audio_asset(rowA.id);
-                    const isAudioB = is_audio_asset(rowB.id);
-                    if (isAudioA !== isAudioB) {
-                        comparison = isAudioA ? -1 : 1;
-                    } else {
-                        comparison = cellA.localeCompare(cellB);
-                    }
-                } else if (dataType === "number") {
-                    comparison = (parseFloat(cellA) || 0) - (parseFloat(cellB) || 0);
-                } else {
-                    comparison = cellA.localeCompare(cellB);
-                }
-
-                return sortOrder[colIndex] === "asc" ? comparison : -comparison;
-            });
-
-            // Toggle direction for next click
-            sortOrder[colIndex] = sortOrder[colIndex] === "asc" ? "desc" : "asc";
-
-            // Re-render sorted rows
-            tbody.innerHTML = "";
-            rowsArray.forEach(row => tbody.appendChild(row));
-        });
-    });
 }
 
 
@@ -549,14 +487,6 @@ function select_all_audio() {
 
 function deselect_all_audio() {
   set_audio_selection(false);
-}
-
-// Toggle all review checkboxes on/off using the header checkbox
-function toggle_checkboxes(source) {
-  checkboxes = document.getElementsByName('review_checkbox');
-  for(var i=0, n=checkboxes.length;i<n;i++) {
-    checkboxes[i].checked = source.checked;
-  }
 }
 
 // Generic progress poller used by all tasks except check_assets
@@ -599,7 +529,6 @@ function get_selected_assets() {
 function remove_assets_from_table(assets) {
   for (const asset of assets) {
     if (asset_table && asset_table.getRow(asset)) asset_table.deleteRow(asset);
-    delete scan_assets[asset];  // keep the store in step with the table
   }
 }
 
