@@ -6,8 +6,8 @@
 from flask import Blueprint, jsonify, render_template, url_for, request
 from app.tasks import *
 from app import celery
-from app.helpers import get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions, parse_qc_fps
-import os
+from app.helpers import (get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions,
+                         parse_qc_fps, get_json_file, ASSETS_JSON)
 
 main = Blueprint("main", __name__)
 
@@ -35,6 +35,49 @@ def qc_config():
         "resolutions": parse_qc_resolutions(),
         "fps": parse_qc_fps()
     })
+
+# Buckets backing the REPO and QUARANTINE browse tabs. Each pair is
+# (untracked, tracked) — "tracked" meaning already pushed to the Google Sheet.
+BROWSE_BUCKETS = {
+    "repo": ("untracked_repo_assets", "tracked_repo_assets"),
+    "quarantine": ("untracked_quar_assets", "tracked_quar_assets"),
+}
+
+
+@main.route('/assets/<bucket>', methods=['GET'])
+def browse_assets(bucket):
+    """
+    Return every asset currently in the repo or quarantine, keyed by fileid, for
+    the read-only browse tabs. Read straight from assets.json — no Celery task,
+    since this is just a local file read.
+    """
+    if bucket not in BROWSE_BUCKETS:
+        return jsonify({"error": "unknown bucket"}), 404
+
+    assets = get_json_file(ASSETS_JSON)
+    result = {}
+    for key, tracked in zip(BROWSE_BUCKETS[bucket], (False, True)):
+        for fileid, asset in (assets.get(key) or {}).items():
+            # The move tasks use .pop(asset, None), so a bucket can legitimately
+            # hold a None where an asset went missing mid-operation.
+            if not asset:
+                continue
+            result[fileid] = dict(asset, tracked=tracked)
+    return jsonify(result)
+
+
+@main.route('/untracked_count', methods=['GET'])
+def untracked_count():
+    """
+    How many approved assets are still waiting to be pushed to the Google Sheet.
+    Used on page load to decide whether the TRACK ASSETS pane should already be
+    open — otherwise a session that approved nothing new could never reach it.
+    """
+    assets = get_json_file(ASSETS_JSON)
+    count = sum(1 for key in ("untracked_repo_assets", "untracked_quar_assets")
+                for asset in (assets.get(key) or {}).values() if asset)
+    return jsonify({"count": count})
+
 
 @main.route('/transcode_assets', methods=['POST'])
 def run_transcode_assets():

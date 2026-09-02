@@ -9,9 +9,15 @@ services:
       - worker
     volumes:
       - .:/app  # Sync local files with container (useful for development)
+      # The browse tabs (/assets/repo, /assets/quarantine, /untracked_count)
+      # read assets.json directly, so the web server needs the workspace too.
+      # Read-only on purpose: every mutation goes through a Celery task in the
+      # worker, so the web container never has cause to write here.
+      - ${WORKSPACE_FOLDER}:/cn4m_assets:ro
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
     environment:
+      - WORKSPACE_FOLDER=${WORKSPACE_FOLDER}
       - FLASK_APP=run.py
       - FLASK_RUN_HOST=0.0.0.0
       - CELERY_BROKER_URL=redis://redis:6379/0

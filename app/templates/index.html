@@ -20,56 +20,102 @@
 </head>
 <body>
 
-	<div class="container p-3">
-    	<img class="" src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}">
+	<div class="container p-3 d-flex justify-content-between align-items-center">
+		<img class="" src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}">
+		<div class="obx-tabs">
+			<button class="obx-button obx-tab obx-button-active" data-tab="ingest">NEW</button>
+			<button class="obx-button obx-tab" data-tab="repo">APPROVED</button>
+			<button class="obx-button obx-tab" data-tab="quarantine">QUARANTINED</button>
+		</div>
 	</div>
 
-    <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
-        <div class="pb-2 text-uppercase fw-semibold obx-orange">1. check assets</div>
-        <div class="row">
-            <div class="col-md-auto">
-                <button id="check-assets" class="obx-button">START</button>
-            </div>
-            <div class="col fs-7 lh-sm">
-                <span>Scans for and checks newly added assets in the repository.</span><br />
-                <span class="fw-lighter" id="check_asset_progress">Press <i>Start</i> to Begin.</span>
-            </div>
-        </div>
-    </div>
+	<div id="tab-ingest" class="tab-panel">
 
     <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
-        <div class="d-flex justify-content-between align-items-center pb-2">
-            <div class="text-uppercase fw-semibold obx-orange">2. review assets</div>
-            <div class="review-buttons" style="display:none; margin-left:auto;">
-                <button id="toggle-qc" class="obx-button">SHOW FLAGGED ONLY</button>
-                <button id="select-flagged" class="obx-button" style="margin-left:0.5rem;">SELECT ALL FLAGGED</button>
-            </div>
-        </div>
-        <div id="results"></div>
-        <div id="review-actions" style="display:none;">
-            <div class="d-flex justify-content-between align-items-center flex-wrap">
-                <div>
-                    <button id="quarantine-assets" class="obx-button">QUARANTINE SELECTED</button>
-                    <button id="approve-assets" class="obx-button">APPROVE SELECTED</button>
-                    <span class="fw-lighter fs-7 ps-2" id="selection_count"></span>
+
+        <div class="ingest-section">
+            <div class="pb-2 text-uppercase fw-semibold obx-orange">check assets</div>
+            <div class="row">
+                <div class="col-md-auto">
+                    <button id="check-assets" class="obx-button">START</button>
                 </div>
-                <div>
-                    <select id="ffmpeg-preset-select" class="obx-select">
-                        <option value="">Select preset...</option>
-                    </select>
-                    <button id="transcode-assets" class="obx-button">TRANSCODE</button>
-                    <button id="quarantine-transcode-assets" class="obx-button">QUARANTINE & TRANSCODE</button>
+                <div class="col fs-7 lh-sm">
+                    <span>Scans for and checks newly added assets in the repository.</span><br />
+                    <span class="fw-lighter" id="check_asset_progress">Press <i>Start</i> to Begin.</span>
                 </div>
             </div>
         </div>
-        <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_flags"></span></div>
-        <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_progress"></span></div>
+
+        <div id="pane-review" class="ingest-section" style="display:none;">
+            <div class="d-flex justify-content-between align-items-center pb-2">
+                <div class="text-uppercase fw-semibold obx-orange">review assets</div>
+                <div class="review-buttons" style="margin-left:auto;">
+                    <button id="toggle-qc" class="obx-button">SHOW FLAGGED ONLY</button>
+                    <button id="select-flagged" class="obx-button" style="margin-left:0.5rem;">SELECT ALL FLAGGED</button>
+                </div>
+            </div>
+            <div id="results"></div>
+            <div id="review-actions">
+                <div class="d-flex justify-content-between align-items-center flex-wrap">
+                    <div>
+                        <button id="quarantine-assets" class="obx-button">QUARANTINE SELECTED</button>
+                        <button id="approve-assets" class="obx-button">APPROVE SELECTED</button>
+                        <span class="fw-lighter fs-7 ps-2" id="selection_count"></span>
+                    </div>
+                    <div>
+                        <select id="ffmpeg-preset-select" class="obx-select obx-preset-select">
+                            <option value="">Select preset...</option>
+                        </select>
+                        <button id="transcode-assets" class="obx-button">TRANSCODE</button>
+                        <button id="quarantine-transcode-assets" class="obx-button">QUARANTINE & TRANSCODE</button>
+                    </div>
+                </div>
+            </div>
+            <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_flags"></span></div>
+            <div class="pt-2"><span class="fw-lighter fs-7" id="review_asset_progress"></span></div>
+        </div>
+
+        <div id="pane-track" class="ingest-section" style="display:none;">
+            <div class="pb-2 text-uppercase fw-semibold obx-orange">track assets</div>
+            <button id="track-assets" class="obx-button">UPDATE GOOGLE SHEET</button><br />
+            <div class="pt-2"><span class="fw-lighter fs-7" id="track_assets_progress"></span></div>
+        </div>
+
+    </div>
+    </div><!-- /#tab-ingest -->
+
+    <div id="tab-repo" class="tab-panel" style="display:none;">
+        <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
+            <div class="d-flex justify-content-between align-items-center pb-2">
+                <div class="text-uppercase fw-semibold obx-orange">approved assets</div>
+                <span class="fw-lighter fs-7" id="repo_status"></span>
+            </div>
+            <div id="repo-results"></div>
+            <div class="d-flex justify-content-end align-items-center flex-wrap">
+                <select id="repo-preset-select" class="obx-select obx-preset-select">
+                    <option value="">Select preset...</option>
+                </select>
+                <button id="repo-transcode" class="obx-button" style="margin-left:0.5rem;">TRANSCODE</button>
+            </div>
+            <div class="pt-2 text-end"><span class="fw-lighter fs-7" id="repo_progress"></span></div>
+        </div>
     </div>
 
-    <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
-        <div class="pb-2 text-uppercase fw-semibold obx-orange">3. track assets</div>
-        <button id="track-assets" class="obx-button">UPDATE GOOGLE SHEET</button><br />
-        <div class="pt-2"><span class="fw-lighter fs-7" id="track_assets_progress"></span></div>
+    <div id="tab-quarantine" class="tab-panel" style="display:none;">
+        <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
+            <div class="d-flex justify-content-between align-items-center pb-2">
+                <div class="text-uppercase fw-semibold obx-orange">quarantined assets</div>
+                <span class="fw-lighter fs-7" id="quarantine_status"></span>
+            </div>
+            <div id="quarantine-results"></div>
+            <div class="d-flex justify-content-end align-items-center flex-wrap">
+                <select id="quarantine-preset-select" class="obx-select obx-preset-select">
+                    <option value="">Select preset...</option>
+                </select>
+                <button id="quarantine-transcode" class="obx-button" style="margin-left:0.5rem;">TRANSCODE</button>
+            </div>
+            <div class="pt-2 text-end"><span class="fw-lighter fs-7" id="quarantine_progress"></span></div>
+        </div>
     </div>
 
 <script>
@@ -84,8 +130,12 @@ $(function() { $('#transcode-assets').click(transcode_assets); });
 $(function() { $('#quarantine-transcode-assets').click(quarantine_and_transcode); });
 $(function() { $('#toggle-qc').click(toggle_qc_filter); });
 $(function() { $('#select-flagged').click(select_all_flagged); });
+$(function() { $('.obx-tab').click(function() { show_tab($(this).data('tab')); }); });
+$(function() { $('#repo-transcode').click(function() { transcode_browse('repo'); }); });
+$(function() { $('#quarantine-transcode').click(function() { transcode_browse('quarantine'); }); });
 $(load_ffmpeg_presets);
 $(load_qc_config);
+$(reveal_track_pane_if_pending);
 
 </script>
 </body>

@@ -110,6 +110,41 @@ body {
 .severity-warn {
   color: yellow;
 }
+/* ── Ingest sections ─────────────────────────────────────────────────────────
+   CHECK / REVIEW / TRACK share one pane, revealed as the workflow progresses.
+   The rule keys off the *general* sibling combinator rather than the adjacent
+   one so that a hidden middle section (review, before a scan) doesn't stop the
+   divider appearing above a later visible one. */
+
+.ingest-section ~ .ingest-section {
+	border-top: 1px solid #3a3a3a;
+	margin-top: 1rem;
+	padding-top: 1rem;
+}
+
+/* ── Tabs ────────────────────────────────────────────────────────────────────
+   INGEST / REPO / QUARANTINE, right-aligned opposite the logo. They reuse
+   .obx-button, with .obx-button-active marking the current tab — the same
+   highlight the SHOW FLAGGED ONLY toggle uses, so "on" reads consistently. */
+
+.obx-tabs {
+	display: flex;
+	gap: 0.5rem;
+}
+
+.obx-tab {
+	cursor: pointer;
+}
+
+/* Tracked / untracked indicator on the browse tabs */
+.tracked-yes {
+	color: #6ee7a8;
+}
+
+.tracked-no {
+	color: #5a5a5a;
+}
+
 /* ── Review table (Tabulator) ────────────────────────────────────────────────
    Overrides the vendored midnight theme to match the cn4m dark UI. Tuned for
    long scans (hundreds of rows): dark, near-flat surfaces and tight rows so

@@ -35,7 +35,7 @@ def transcode_assets(self, assets_json, preset_name):
     from config/ffmpeg_config.yaml. Reports progress per asset.
     """
     assets_to_transcode = json.loads(assets_json)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
 
     config = load_ffmpeg_config()
     preset = next((p for p in config.get("presets", []) if p["name"] == preset_name), None)
@@ -46,14 +46,19 @@ def transcode_assets(self, assets_json, preset_name):
     i = 0
     for asset_id in assets_to_transcode:
         i += 1
-        asset_data = assets["unreviewed_assets"].get(asset_id)
+        # Searched across every bucket, not just unreviewed_assets: transcode can
+        # now be run from the APPROVED and QUARANTINED tabs too.
+        asset_data, bucket = find_asset(assets, asset_id)
         if not asset_data:
             self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_transcode), 'status': f"skipped {asset_id} (not found)"})
             continue
 
-        folder = asset_data["folder"]
         filename = asset_data["name"]
-        src = os.path.join(folder, filename)
+        src = asset_source_path(asset_data, bucket)
+
+        if not os.path.isfile(src):
+            self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_transcode), 'status': f"skipped {filename} (file missing)"})
+            continue
 
         self.update_state(state='PROGRESS', meta={'current': i, 'total': len(assets_to_transcode), 'status': filename})
 
@@ -80,7 +85,7 @@ def quarantine_and_transcode(self, assets_json, preset_name):
     total = len(assets_to_process) * 2
     i = 0
 
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
 
     config = load_ffmpeg_config()
     preset = next((p for p in config.get("presets", []) if p["name"] == preset_name), None)
@@ -117,7 +122,7 @@ def quarantine_and_transcode(self, assets_json, preset_name):
         time.sleep(sleep_time)
 
     # Reload assets in case the transcode triggered a check_assets
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
 
     # ── Phase 2: Quarantine originals (only the ones that transcoded) ────────
     for asset_id in assets_to_process:
@@ -172,7 +177,7 @@ def approve_assets(self, assets):
     The files themselves stay in place — only the JSON state changes.
     """
     assets_to_approve = json.loads(assets)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
     i = 0
     for asset in assets_to_approve:
         i = i+1
@@ -199,7 +204,7 @@ def quarantine_assets(self, assets):
     If a file has disappeared since the last check, flag it instead of crashing.
     """
     assets_to_quarantine = json.loads(assets)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
     i = 0
     for asset in assets_to_quarantine:
         i = i+1
@@ -245,7 +250,7 @@ def check_assets(self):
     repo_folder = get_folder(cn4m_repo)
     quar_folder = get_folder(cn4m_quarantine)
     repo_files = get_files_from_folder(cn4m_repo)
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
 
     tracked_repo_assets = assets["tracked_repo_assets"]
     tracked_quar_assets = assets["tracked_quar_assets"]
@@ -352,7 +357,7 @@ def track_assets(self):
     Handles both repo and quarantine assets in one call.
     Does nothing if there are no untracked assets.
     """
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
     total = len(assets["untracked_repo_assets"]) + len(assets["untracked_quar_assets"])
 
     if total > 0:
@@ -411,7 +416,7 @@ def clear_flags(self):
     the unreviewed_flags bucket to empty. Called automatically after each asset check
     so the flags panel stays fresh and only shows results from the latest scan.
     """
-    assets = get_json_file(os.path.join(cn4m_repo, "assets.json"))
+    assets = get_json_file(ASSETS_JSON)
     total = len(assets["unreviewed_flags"])
 
     if total > 0:

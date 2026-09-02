@@ -30,6 +30,21 @@ let qc_filter_active = false;
 // mis-size or hide a newly added column.
 const PERSISTENCE_ID = "cn4m-review-v1";
 
+// The read-only REPO / QUARANTINE tables, built lazily the first time their tab
+// is opened. Same columns and machinery as the review table — see
+// create_asset_table, which all three go through.
+let browse_tables = { repo: null, quarantine: null };
+
+// Transcode can be started from three tabs, but they all POST to the same
+// endpoint — so update_progress can't tell them apart from the URL. Whoever
+// starts a run records where its progress text should go.
+let transcode_progress_destination = "#review_asset_progress";
+
+// The internal keys stay repo/quarantine — they map straight onto the
+// *_repo_assets / *_quar_assets buckets in assets.json and the /assets/<bucket>
+// route. These are just what the user sees.
+const BROWSE_LABELS = { repo: "approved", quarantine: "quarantined" };
+
 // Extension groups, shared by the file-type icons and the audio-selection
 // helpers. Compared lowercase with any leading dot stripped.
 const AUDIO_EXTS = ["wav", "aiff", "aif", "mp3", "flac", "ogg", "m4a", "aac", "wma"];
@@ -97,14 +112,18 @@ function check_assets() {
 
 function approve_assets() {
   selected_assets = get_selected_assets()
+  if (!selected_assets.length) return;
   ajax_post_with_selection('/approve_assets', selected_assets)
   remove_assets_from_table(selected_assets)  // optimistically remove rows while the task runs
+  reveal_track_pane()  // there is now something worth pushing to the sheet
 }
 
 function quarantine_assets() {
   selected_assets = get_selected_assets()
+  if (!selected_assets.length) return;
   ajax_post_with_selection('/quarantine_assets', selected_assets)
   remove_assets_from_table(selected_assets)  // optimistically remove rows while the task runs
+  reveal_track_pane()  // quarantined assets get pushed to the sheet too
 }
 
 function track_assets() {
@@ -117,10 +136,13 @@ function track_assets() {
 
 function load_ffmpeg_presets() {
   $.getJSON('/ffmpeg_presets', function(presets) {
-    var $select = $('#ffmpeg-preset-select');
-    $select.find('option:not(:first)').remove();
-    $.each(presets, function(i, preset) {
-      $select.append($('<option>', { value: preset.name, text: preset.label }));
+    // One dropdown per tab that can transcode — all share .obx-preset-select
+    $('.obx-preset-select').each(function() {
+      var $select = $(this);
+      $select.find('option:not(:first)').remove();
+      $.each(presets, function(i, preset) {
+        $select.append($('<option>', { value: preset.name, text: preset.label }));
+      });
     });
   });
 }
@@ -139,6 +161,7 @@ function transcode_assets() {
     alert('Please select a preset.');
     return;
   }
+  transcode_progress_destination = "#review_asset_progress";
   ajax_post_transcode('/transcode_assets', selected, preset_name);
   if (asset_table) asset_table.deselectRow();
 }
@@ -154,9 +177,11 @@ function quarantine_and_transcode() {
     alert('Please select a preset.');
     return;
   }
+  transcode_progress_destination = "#review_asset_progress";
   ajax_post_transcode('/quarantine_and_transcode', selected, preset_name);
   if (asset_table) asset_table.deselectRow();
   remove_assets_from_table(selected);
+  reveal_track_pane();
 }
 
 
@@ -202,10 +227,12 @@ function update_progress(status_task, status_url) {
       break;
 
     case "transcode_assets":
-      msg_destination = "#review_asset_progress"
+      msg_destination = transcode_progress_destination
       msg_pending = "Starting Transcode"
       msg_progress = "Transcoding"
-      msg_complete = "Transcode Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
+      msg_complete = transcode_progress_destination === "#review_asset_progress"
+        ? "Transcode Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
+        : "Transcode Complete"
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
       break;
 
@@ -438,9 +465,10 @@ function header_filter_value_for(cell) {
 // a manual localStorage purge. Clearing by prefix avoids depending on
 // Tabulator's per-key suffixes, and re-applying the definitions rebuilds the
 // default layout without a page reload — which would throw away the scan.
-function reset_table_layout() {
-  if (!asset_table) return;
-  const prefix = "tabulator-" + PERSISTENCE_ID;
+function reset_table_layout(table) {
+  if (!table) return;
+  const options = table.cn4m_options || {};
+  const prefix = "tabulator-" + options.persistence_id;
   try {
     Object.keys(window.localStorage)
       .filter(key => key.indexOf(prefix) === 0)
@@ -448,7 +476,7 @@ function reset_table_layout() {
   } catch (err) {
     console.warn("could not clear persisted layout", err);  // private mode, etc.
   }
-  asset_table.setColumns(asset_columns());
+  table.setColumns(asset_columns(options));
 }
 
 function cell_context_menu(e, cell) {
@@ -469,18 +497,44 @@ function cell_context_menu(e, cell) {
       action: () => column.setHeaderFilterValue(""),
     });
   }
+  // Scoped to the cell's own table — this menu is shared by all three tables,
+  // so reaching for the ingest table here would clear the wrong one.
+  const table = cell.getTable();
   items.push({
     label: "Clear all filters",
-    action: () => asset_table.clearHeaderFilter(),
+    action: () => table.clearHeaderFilter(),
   });
   items.push({
     label: "Reset column layout",
-    action: reset_table_layout,
+    action: () => reset_table_layout(table),
   });
   return items;
 }
 
-function asset_columns() {
+// Tracked = already pushed to the Google Sheet. Only shown on the browse tabs;
+// on the ingest table every row is untracked by definition.
+function tracked_formatter(cell) {
+  return cell.getValue()
+    ? '<span class="tracked-yes" title="pushed to the Google Sheet">&#10003;</span>'
+    : '<span class="tracked-no" title="not yet pushed to the Google Sheet">&ndash;</span>';
+}
+
+const TRACKED_COLUMN = {
+  title: "Tracked",
+  field: "tracked",
+  formatter: tracked_formatter,
+  sorter: "boolean",
+  hozAlign: "center",
+  headerHozAlign: "center",
+  width: 78,
+  headerFilter: "list",
+  headerFilterParams: { values: { "true": "tracked", "false": "untracked" }, clearable: true },
+  headerFilterFunc: (header_value, row_value) => String(!!row_value) === header_value,
+  headerFilterPlaceholder: "all",
+};
+
+function asset_columns(options) {
+  const trailing = (options && options.tracked) ? [TRACKED_COLUMN] : [];
   return [
     { title: "Folder",        field: "parent",         formatter: folder_formatter,  maxInitialWidth: 260, ...TEXT_FILTER },
     { title: "Name",          field: "name",           formatter: name_formatter,    maxInitialWidth: 340, ...TEXT_FILTER },
@@ -497,7 +551,7 @@ function asset_columns() {
     { title: "Bits",          field: "audio_bits",     sorter: "number", ...number_filter() },
     { title: "Ch",            field: "audio_channels", sorter: "number", ...number_filter() },
     { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes"), ...number_filter("size_bytes", 1048576, "= > < MiB"), minWidth: 95 },
-  ];
+  ].concat(trailing);
 }
 
 // Flatten the scan result (keyed by fileid) into Tabulator's row array. Values
@@ -525,39 +579,39 @@ function asset_rows(assets_by_id) {
     audio_channels: asset.audio_channels,
     size: asset.size || "",
     size_bytes: asset.size_bytes,
+    tracked: !!asset.tracked,  // set by /assets/<bucket>; absent (false) on a scan
     };
     row.qc_fail = row_qc_fails(row);  // stamped once here; the toggle filters on it
     return row;
   });
 }
 
-// Build the table on the first scan; refresh its data on every scan after that
-// (which keeps the user's column widths and, later, their filters).
-function render_asset_table(assets_by_id) {
-  const rows = asset_rows(assets_by_id);
-
-  if (asset_table) {
-    asset_table.replaceData(rows).then(update_qc_button);
-    return;
-  }
-
-  asset_table = new Tabulator("#results", {
-    data: rows,
+// Every table in the app — the ingest review table and the two browse tabs —
+// is built here, so columns, QC formatting, filters, clipboard and the
+// right-click menu stay identical across them. Options:
+//   selectable      checkbox column + row selection (ingest only)
+//   tracked         show the TRACKED column (browse tabs only)
+//   persistence_id  separate localStorage key per table
+//   data            initial rows
+//   placeholder     empty-state text
+function create_asset_table(element, options) {
+  const config = {
+    data: options.data || [],
     index: "fileid",              // lets deleteRow() address rows by fileid
-    columns: asset_columns(),
+    columns: asset_columns(options),
     // fitDataStretch is the only fitData variant whose layout function respects
     // a manually resized column (`e.widthFixed || e.reinitializeWidth()`); the
     // others call reinitializeWidth() unconditionally, which clears the fixed
     // flag and snaps the column back to whatever its longest value needs.
     layout: "fitDataStretch",
-    maxHeight: "75vh",            // long scans scroll inside the table (virtual DOM)
-    placeholder: "No new assets found.",
+    maxHeight: "75vh",            // long lists scroll inside the table (virtual DOM)
+    placeholder: options.placeholder || "No assets found.",
     // Column widths/order and the sort survive a reload. Filters deliberately
     // do NOT — see reset_table_layout() and the note in TODO_TABULATOR.md.
     persistence: { columns: true, sort: true },
-    persistenceID: PERSISTENCE_ID,
+    persistenceID: options.persistence_id,
     // Ctrl/Cmd-C copies the table out as TSV for Sheets/Excel. "copy" (not true)
-    // leaves paste disabled — this is a review table, not an editable one.
+    // leaves paste disabled — these are review tables, not editable ones.
     // Row range "active" = the rows passing the current filters, so what you
     // copy is what you see. clipboardCopyStyled:false and formatCells:false send
     // the underlying values rather than our icon/QC markup.
@@ -565,13 +619,17 @@ function render_asset_table(assets_by_id) {
     clipboardCopyRowRange: "active",
     clipboardCopyStyled: false,
     clipboardCopyConfig: { columnHeaders: true, formatCells: false, rowGroups: false, columnCalcs: false },
-    selectableRows: true,
     columnDefaults: {
       headerHozAlign: "left",
       vertAlign: "middle",
       contextMenu: cell_context_menu,  // right-click a value to filter by it
     },
-    rowHeader: {
+  };
+
+  // Only the ingest table is selectable — the browse tabs are read-only.
+  if (options.selectable) {
+    config.selectableRows = true;
+    config.rowHeader = {
       formatter: "rowSelection",
       titleFormatter: "rowSelection",
       // "active" = rows passing the current filters. Without this the header
@@ -584,7 +642,144 @@ function render_asset_table(assets_by_id) {
       hozAlign: "center",
       headerHozAlign: "center",
       cellClick: function(e, cell) { cell.getRow().toggleSelect(); },
-    },
+    };
+  }
+
+  const table = new Tabulator(element, config);
+  table.cn4m_options = options;  // reset_table_layout needs these back
+  return table;
+}
+
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+// INGEST is the working view; REPO and QUARANTINE are read-only browsers over
+// assets.json. Browse data is re-fetched on every activation so approving or
+// quarantining on the ingest tab is reflected as soon as you switch across.
+function show_tab(name) {
+  $('.tab-panel').hide();
+  $('#tab-' + name).show();
+  $('.obx-tab').removeClass('obx-button-active');
+  $('.obx-tab[data-tab="' + name + '"]').addClass('obx-button-active');
+
+  if (name === 'repo' || name === 'quarantine') load_browse_tab(name);
+}
+
+// Header line for a browse tab: "12 assets" plus a selection count once rows
+// are ticked, so the transcode button's scope is always visible.
+function update_browse_status(name) {
+  const table = browse_tables[name];
+  if (!table) return;
+  const total = table.getDataCount();
+  const selected = table.getSelectedRows().length;
+  const label = total === 1 ? "1 asset" : total + " assets";
+  $('#' + name + '_status').text(selected ? label + " \u00b7 " + selected + " selected" : label);
+}
+
+function browse_selection_handler(name) {
+  const table = browse_tables[name];
+  if (!table || table.cn4m_selection_wired) return;
+  table.cn4m_selection_wired = true;
+  table.on("rowSelectionChanged", () => update_browse_status(name));
+}
+
+function load_browse_tab(name) {
+  const status = $('#' + name + '_status');
+  status.text("Loading\u2026");
+
+  $.getJSON('/assets/' + name)
+    .done(function(data) {
+      const rows = asset_rows(data);
+      const count = rows.length;
+      status.text(count === 1 ? "1 asset" : count + " assets");
+
+      browse_selection_handler(name);
+
+      if (browse_tables[name]) {
+        // The table was built while its tab was visible, but has been hidden
+        // since — redraw(true) re-measures columns against the live width.
+        browse_tables[name].replaceData(rows)
+          .then(() => browse_tables[name].redraw(true));
+        return;
+      }
+
+      browse_tables[name] = create_asset_table('#' + name + '-results', {
+        data: rows,
+        tracked: true,        // these views span both tracked and untracked
+        selectable: true,     // rows can be picked for transcoding
+        // -v2: bumped when TRACKED moved to the last column. Persisted layouts
+        // store column order, so a stale -v1 layout would keep it up front.
+        persistence_id: "cn4m-" + name + "-v2",
+        placeholder: "No " + BROWSE_LABELS[name] + " assets.",
+      });
+    })
+    .fail(function() {
+      status.text("Could not load assets.");
+    });
+}
+
+// Transcode the rows ticked on a browse tab. The backend resolves each asset
+// across all buckets and, for quarantined ones, against the quarantine folder —
+// their stored folder still points at where they were originally delivered.
+function transcode_browse(name) {
+  const table = browse_tables[name];
+  if (!table) return;
+
+  const selected = table.getSelectedData().map(row => row.fileid);
+  if (!selected.length) {
+    alert('Please select at least one asset.');
+    return;
+  }
+  const preset_name = $('#' + name + '-preset-select').val();
+  if (!preset_name) {
+    alert('Please select a preset.');
+    return;
+  }
+
+  transcode_progress_destination = '#' + name + '_progress';
+  ajax_post_transcode('/transcode_assets', selected, preset_name);
+  table.deselectRow();
+}
+
+
+// ── Progressive disclosure of the ingest panes ────────────────────────────────
+// The review pane opens once a scan has produced a table; the track pane opens
+// once something has been approved or quarantined.
+
+function reveal_review_pane() {
+  $('#pane-review').show();
+}
+
+function reveal_track_pane() {
+  $('#pane-track').show();
+}
+
+// Approving in an earlier session would otherwise leave the track pane
+// unreachable, so open it on load if anything is still waiting to be pushed.
+function reveal_track_pane_if_pending() {
+  $.getJSON('/untracked_count', function(data) {
+    if (data && data.count > 0) reveal_track_pane();
+  });
+}
+
+
+// ── Ingest review table ───────────────────────────────────────────────────────
+
+// Build it on the first scan; refresh its data on every scan after that, which
+// keeps the user's column widths and filters.
+function render_asset_table(assets_by_id) {
+  const rows = asset_rows(assets_by_id);
+
+  if (asset_table) {
+    asset_table.replaceData(rows).then(update_qc_button);
+    return;
+  }
+
+  asset_table = create_asset_table("#results", {
+    data: rows,
+    selectable: true,
+    persistence_id: PERSISTENCE_ID,
+    placeholder: "No new assets found.",
   });
 
   // Selection survives a filter change, so a row can be selected while hidden.
@@ -736,8 +931,7 @@ function handle_check_assets_progress(status_task, status_url) {
         );
         data['result']['assets'] = data_sorted;
         render_asset_table(data_sorted);
-        $('#review-actions').show();
-        $('.review-buttons').show();
+        reveal_review_pane();
 
         // ── Flag display ───────────────────────────────────────────────────────
         // Show any flagged (invalid/missing) files below the table, then clear them

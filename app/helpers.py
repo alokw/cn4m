@@ -485,13 +485,28 @@ def ensure_workspace_folders():
 
 # ── JSON state file ───────────────────────────────────────────────────────────
 
+# assets.json lives at the workspace root, alongside repo/ and quarantine/,
+# rather than inside repo/ where the scanner would keep tripping over it.
+ASSETS_JSON = os.path.join(cn4m_folder, "assets.json")
+
+# Where it used to live. Workspaces created before the move are read from here
+# and relocated on the next write — see write_json_file.
+LEGACY_ASSETS_JSON = os.path.join(cn4m_repo, "assets.json")
+
+
 def get_json_file(file):
     """
     Load assets.json from disk. If the file is missing or contains invalid JSON,
     returns an empty dict. Also ensures all expected top-level keys exist so the
     rest of the code can safely read/write each bucket without key errors.
+
+    Falls back to the pre-move location so an un-migrated workspace still reads
+    correctly; the file is relocated on the next write.
     """
     json_file = Path(file)
+    if not json_file.is_file() and str(file) == ASSETS_JSON and Path(LEGACY_ASSETS_JSON).is_file():
+        json_file = Path(LEGACY_ASSETS_JSON)
+
     if json_file.is_file():
         with open(json_file) as f:
             try:
@@ -510,11 +525,59 @@ def get_json_file(file):
 
     return json_data
 
+# Every bucket an asset can live in, in the order they're searched.
+ASSET_BUCKETS = ("unreviewed_assets",
+                 "untracked_repo_assets", "tracked_repo_assets",
+                 "untracked_quar_assets", "tracked_quar_assets")
+
+QUARANTINE_BUCKETS = ("untracked_quar_assets", "tracked_quar_assets")
+
+
+def find_asset(assets, asset_id):
+    """
+    Locate an asset across every bucket, returning (asset_data, bucket_name) or
+    (None, None). Actions that can run from the browse tabs need this — an
+    approved or quarantined asset is no longer in unreviewed_assets.
+    """
+    for bucket in ASSET_BUCKETS:
+        asset_data = (assets.get(bucket) or {}).get(asset_id)
+        if asset_data:
+            return asset_data, bucket
+    return None, None
+
+
+def asset_source_path(asset_data, bucket):
+    """
+    Where the file actually is on disk.
+
+    Quarantined assets keep their original delivery folder in the JSON, so the
+    UI can show where a file came from — but the file itself was moved to the
+    quarantine folder. Joining folder + name would point at nothing.
+    """
+    filename = asset_data["name"]
+    if bucket in QUARANTINE_BUCKETS:
+        return os.path.join(cn4m_quarantine, filename)
+    return os.path.join(asset_data["folder"], filename)
+
+
 def write_json_file(json_data, json_filename):
-    """Serialize json_data and write it to assets.json in the repo folder."""
-    json_file = Path(os.path.join(cn4m_repo, json_filename))
+    """
+    Serialize json_data and write it to the workspace root.
+
+    Completes the move for older workspaces: once the new file is safely on
+    disk, the copy under repo/ is removed. Data is written before anything is
+    deleted, so an interrupted migration leaves the old file intact.
+    """
+    json_file = Path(os.path.join(cn4m_folder, json_filename))
     with open(json_file, 'w') as f:
         json.dump(json_data, f, indent=4)
+
+    legacy = Path(os.path.join(cn4m_repo, json_filename))
+    if legacy.is_file() and legacy.resolve() != json_file.resolve():
+        try:
+            legacy.unlink()
+        except OSError as err:
+            print(f"could not remove the old {json_filename} in repo/: {err}")
 
 
 # ── Media metadata extraction ─────────────────────────────────────────────────
@@ -790,4 +853,6 @@ def purge_exclude_files(assets):
     return assets
 
 
-__all__ = ["get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "version_sort_key", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps", "qc_resolution_rules", "qc_resolution_fails"]
+__all__ = ["ASSETS_JSON", "LEGACY_ASSETS_JSON", "ASSET_BUCKETS", "QUARANTINE_BUCKETS",
+           "find_asset", "asset_source_path",
+           "get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "version_sort_key", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps", "qc_resolution_rules", "qc_resolution_fails"]

@@ -40,7 +40,7 @@ To stop: `docker compose down`. A Celery task dashboard (Flower) is also availab
 2. **Review** — Displays all new assets in a sortable, filterable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec, resolution, or framerate) are highlighted red, and a single button narrows the table to just the flagged assets. See [Reviewing assets](#reviewing-assets).
 3. **Approve or Quarantine** — Approved files stay in place and are ready to track. Quarantined files are physically moved to a separate folder for manual review.
 4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`. QC failures are highlighted red in the sheet too.
-5. **Transcode** — Runs selected assets through configurable ffmpeg presets (HAP, H.264 proxies, WAV extraction, audio-to-HAP wrapping for disguise/d3 media servers), optionally quarantining the originals afterward.
+5. **Transcode** — Runs selected assets through configurable ffmpeg presets (HAP, H.264 proxies, WAV extraction, audio-to-HAP wrapping for disguise/d3 media servers), optionally quarantining the originals afterward. Available on new assets and on anything already approved or quarantined.
 
 Optionally, cn4m posts a summary to a Discord channel whenever files are approved, quarantined, or pushed to the sheet.
 
@@ -73,9 +73,12 @@ cn4m expects a single workspace folder on your host machine. Point `WORKSPACE_FO
 
 ```
 M:\your_workspace\        ← WORKSPACE_FOLDER points here (you create this)
+    assets.json           ← cn4m's state file — every asset it knows about
     repo\                 ← auto-created — media deliveries land here
     quarantine\           ← auto-created — files moved here when quarantined
 ```
+
+`assets.json` sits at the workspace root rather than inside `repo\`, so the scanner isn't walking over its own state file. **Upgrading from an older version?** Nothing to do — cn4m reads the old `repo\assets.json` and moves it up on its next write (scan, approve, quarantine or track). The new file is written before the old one is removed, so an interrupted migration leaves your state intact. Once it's moved you can drop `assets.json` from `EXCLUDE_FILES` in `.env`, though leaving it there is harmless.
 
 **Why one folder?** Docker treats each bind mount as a separate filesystem inside the container. If `repo` and `quarantine` were mounted separately, quarantining a file would fall back to a full byte-copy through the Docker Desktop virtualization layer — extremely slow for large media files. Putting both under a single mount makes quarantine a metadata-only rename that completes instantly.
 
@@ -137,16 +140,16 @@ Preset options can reference `{field}` tokens (like `{framerate}`) that are fill
 
 ## Workflow
 
-Once the app is open in your browser:
+Once the app is open in your browser, you land on the **NEW** tab. Its three sections — CHECK ASSETS, REVIEW ASSETS and TRACK ASSETS — share a single pane that expands as you go, so you're never looking at a stage you can't use yet.
 
 **1. Check Assets**
-Click **START** to scan the repo folder for new files. A progress bar shows each file being analyzed. When complete, all new assets appear in the table below.
+Click **START** to scan the repo folder for new files. A progress bar shows each file being analyzed. When the scan completes, the **REVIEW ASSETS** pane opens with everything it found.
 
 **2. Review Assets**
 The table shows each file's folder, name, screen, version, duration, codec, resolution, framerate, audio specs, and size. Sort by any column, filter by any column, and tick the rows you want to act on — see [Reviewing assets](#reviewing-assets) for the full set of controls.
 
 - Codec, resolution, and framerate cells that fail your QC rules appear in red (hover for the expected value). **SHOW FLAGGED ONLY** narrows the table to just those files, and **SELECT ALL FLAGGED** selects them.
-- Flagged files (invalid or corrupt) appear below the table with a warning note.
+- Files that couldn't be parsed at all (invalid or corrupt) are listed below the table with a warning note.
 
 **3. Approve, Quarantine, or Transcode**
 With files selected:
@@ -155,14 +158,39 @@ With files selected:
 - **TRANSCODE** — runs them through the ffmpeg preset chosen in the dropdown (output lands next to the source file).
 - **QUARANTINE & TRANSCODE** — transcodes them, then quarantines the originals.
 
+Approving or quarantining opens the **TRACK ASSETS** pane.
+
 **4. Track Assets**
 Click **UPDATE GOOGLE SHEET** to push all approved (not yet tracked) assets to the configured Google Sheet. Both repo and quarantine assets are pushed. Each asset gets a row with status set to `received`, and QC failures are highlighted red in the sheet.
+
+**Afterwards**
+The **APPROVED** and **QUARANTINED** tabs show everything already in each state, so you can look back over past deliveries, check what's still waiting to reach the sheet, or re-transcode something without scanning it in again. See [Tabs](#tabs).
+
+---
+
+## Tabs
+
+Three tabs sit opposite the logo:
+
+| Tab | What it shows |
+|---|---|
+| **NEW** | The working view — scan, review, approve/quarantine, track. Selected by default. |
+| **APPROVED** | Every approved asset in the repo. Browse, filter, and re-transcode. |
+| **QUARANTINED** | Every quarantined asset. Same controls as APPROVED. |
+
+**APPROVED and QUARANTINED each list both tracked and untracked assets** — everything in that state, whether or not it has reached the Google Sheet yet. The TRACKED column tells them apart, and you can filter on it to see just what's still waiting to be pushed.
+
+The NEW tab reveals its panes as you go: **CHECK ASSETS** on its own at first, **REVIEW ASSETS** once a scan finishes, and **TRACK ASSETS** once you've approved or quarantined something. (If assets from an earlier session are still waiting to be pushed to the sheet, the track pane opens straight away, so you can always reach it.)
+
+APPROVED and QUARANTINED are the same table as the review view — same columns, sorting, filters, selection and clipboard copy — plus a **TRACKED** column at the end showing whether each asset has been pushed to the Google Sheet yet. Each also has its own preset dropdown and **TRANSCODE** button, so you can re-encode something that has already been approved or quarantined without scanning it in again. Approve and quarantine themselves stay on the NEW tab. They re-read `assets.json` each time you open them, so they always reflect what you just did on the NEW tab.
+
+Note that the FOLDER column on the QUARANTINED tab shows where an asset was *delivered*, not the quarantine folder it now lives in — the original path is kept so you can see where it came from. Transcoding resolves the real location, so a quarantined asset is read from (and its output written to) the quarantine folder.
 
 ---
 
 ## Reviewing assets
 
-The review table (step 2) is built on [Tabulator](https://tabulator.info/) 6.5.2, vendored in `app/static/` — no build step or package manager involved.
+The review table is built on [Tabulator](https://tabulator.info/) 6.5.2, vendored in `app/static/` — no build step or package manager involved. The same table powers the APPROVED and QUARANTINED tabs, so everything below applies there too.
 
 ### Sorting
 
@@ -195,7 +223,7 @@ Numeric columns accept operators, so you can type:
 
 ### Flagged assets
 
-"Flagged" means the asset fails any QC rule — codec, resolution or framerate — i.e. the rows showing red cells. Two buttons sit above the table:
+"Flagged" means the asset fails any QC rule — codec, resolution or framerate — i.e. the rows showing red cells. Red QC cells appear on every tab; these two buttons are on the NEW tab, above the table:
 
 - **SHOW FLAGGED ONLY (n)** — narrows the table to flagged assets. The count tells you how many the scan found without your having to click. Combines with the column filters rather than replacing them.
 - **SELECT ALL FLAGGED** — selects the flagged rows in place, ready for QUARANTINE or TRANSCODE.
@@ -206,7 +234,7 @@ Both turn orange while active, and both disappear if no QC rules are configured 
 
 Tick rows individually, or use the checkbox in the header to select everything. **Selection follows your filters**: the header checkbox and SELECT ALL FLAGGED only ever touch rows you can currently see.
 
-A count next to the action buttons shows how many assets are selected. Because a selection survives a filter change, it reads `12 selected (3 hidden by filter)` when some of the selected rows are no longer visible — worth a glance before approving or quarantining, since those actions move real files.
+On the NEW tab a count sits next to the action buttons. Because a selection survives a filter change, it reads `12 selected (3 hidden by filter)` when some of the selected rows are no longer visible — worth a glance before approving or quarantining, since those actions move real files. On APPROVED and QUARANTINED the same count appears in the panel header (`14 assets · 3 selected`).
 
 ### Copying to a spreadsheet
 
@@ -235,15 +263,19 @@ cn4m runs as four Docker services:
 | `redis` | Message broker between Flask and Celery |
 | `flower` | Celery task monitoring dashboard (http://localhost:5555) |
 
-**The frontend** is a single page with no build step: jQuery, Bootstrap and Tabulator 6.5.2 are vendored as plain files in `app/static/`. `cn4m.js` polls the task status endpoint and owns the review table — column definitions, QC formatting, filters and selection.
+**The frontend** is a single page with no build step: jQuery, Bootstrap and Tabulator 6.5.2 are vendored as plain files in `app/static/`. `cn4m.js` polls the task status endpoint and owns the asset tables — column definitions, QC formatting, filters and selection. All three tables (review, repo, quarantine) are built by one `create_asset_table()` factory, differing only in whether rows are selectable and whether the TRACKED column is shown.
 
-**State** is stored in `assets.json` in the repo folder. Every file gets a unique ID (xxhash of its folder path + filename), and assets move through these buckets as they progress:
+Two read-only endpoints back the browse tabs: `GET /assets/repo` and `GET /assets/quarantine` merge the tracked and untracked buckets and stamp each asset with `tracked`. `GET /untracked_count` reports how many assets are still waiting to be pushed to the sheet. These read `assets.json` directly rather than going through Celery, so **the `web` service mounts your workspace folder too** — read-only, since every mutation happens in the worker. If you add these routes to an existing deployment, `docker compose up -d` is required (a plain `restart` won't pick up a new volume).
+
+**State** is stored in `assets.json` at the workspace root. Every file gets a unique ID (xxhash of its folder path + filename), and assets move through these buckets as they progress:
 
 ```
 unreviewed_assets  →  untracked_repo_assets  →  tracked_repo_assets
                    →  untracked_quar_assets  →  tracked_quar_assets
                    →  unreviewed_flags
 ```
+
+Actions that can be started from more than one tab look an asset up across *all* of these buckets rather than assuming it's still unreviewed, and resolve its path accordingly — a quarantined asset's stored `folder` is where it was delivered, but the file itself now lives in the quarantine folder.
 
 **All actions are async**: each button click fires a POST request that starts a Celery task, and the browser polls a `/status/<task_id>` endpoint to update the progress display.
 
