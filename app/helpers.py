@@ -428,20 +428,30 @@ def move_files(uid, src, dst):
     Move a file from src to dst, creating any missing parent directories.
     Handles cross-device moves (EXDEV) by copying then deleting the original.
     uid is the asset's fileid hash, used to name the temporary file during cross-device copies.
+
+    Raises OSError if the move did not complete, including the case where the
+    original is still present afterwards.
     """
     try:
         os.renames(src, dst)
     except OSError as err:
-        if err.errno == errno.EXDEV:
-            # Cross-device move: copy to a temp file at the destination, then remove the source
-            tmp_dst = "%s.%s.tmp" % (dst, uid)
-            shutil.copyfile(src, tmp_dst)
-            os.renames(tmp_dst, dst)
-            os.unlink(src)
-        else:
+        # PermissionError and friends are OSError subclasses, so they arrive here
+        # too. Anything that isn't a cross-device move is a genuine failure and
+        # must propagate — a caller that records a move which never happened
+        # leaves the asset in repo/ while claiming it is quarantined.
+        if err.errno != errno.EXDEV:
             raise
-    except PermissionError:
-        print(f"Permission error moving {src} → {dst}")
+        # Cross-device move: copy to a temp file at the destination, swap it into
+        # place, then remove the source.
+        tmp_dst = "%s.%s.tmp" % (dst, uid)
+        shutil.copyfile(src, tmp_dst)
+        os.renames(tmp_dst, dst)
+        os.unlink(src)
+
+    # A "move" that leaves the original behind is a copy. Refuse to report
+    # success, so the asset stays reviewable instead of appearing in two places.
+    if os.path.isfile(src):
+        raise OSError(f"move left the original in place: {src}")
 
 def get_files_from_folder(folder):
     """

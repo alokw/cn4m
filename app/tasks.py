@@ -149,7 +149,14 @@ def quarantine_and_transcode(self, assets_json, preset_name):
         self.update_state(state='PROGRESS', meta={'current': i, 'total': total, 'status': f"quarantining {filename}"})
 
         if os.path.isfile(src):
-            move_files(asset_id, src, dest)
+            try:
+                move_files(asset_id, src, dest)
+            except OSError as err:
+                assets["unreviewed_flags"][asset_id] = assets["unreviewed_assets"].pop(asset_id)
+                assets["unreviewed_flags"][asset_id]["note"] = f"transcoded, but quarantine failed and the original is still in place: {err}"
+                assets["unreviewed_flags"][asset_id]["severity"] = "warn"
+                time.sleep(sleep_time)
+                continue
             assets["untracked_quar_assets"][asset_id] = assets["unreviewed_assets"].pop(asset_id)
         else:
             assets["unreviewed_flags"][asset_id] = assets["unreviewed_assets"].pop(asset_id)
@@ -215,8 +222,16 @@ def quarantine_assets(self, assets):
         dest = os.path.join(cn4m_quarantine, filename)
 
         if os.path.isfile(src):
-            # Move file and record it as a quarantined asset
-            move_files(asset, src, dest)
+            try:
+                move_files(asset, src, dest)
+            except OSError as err:
+                # Leave it unreviewed and say so, rather than recording a
+                # quarantine that never happened.
+                assets["unreviewed_flags"][asset] = assets["unreviewed_assets"].pop(asset, None)
+                assets["unreviewed_flags"][asset]["note"] = f"quarantine failed, file left in place: {err}"
+                assets["unreviewed_flags"][asset]["severity"] = "warn"
+                time.sleep(sleep_time)
+                continue
             assets["untracked_quar_assets"][asset] = assets["unreviewed_assets"].pop(asset, None)
         else:
             # File is gone — flag it so the user knows rather than silently dropping it
@@ -258,8 +273,16 @@ def check_assets(self):
     untracked_quar_assets = assets["untracked_quar_assets"]
     unreviewed_assets = {}  # fresh dict — new discoveries only; existing unreviewed assets are merged in later
 
-    # Build the set of already-known file IDs so we don't re-scan them
-    current_fileids = set(tracked_repo_assets.keys()).union(untracked_repo_assets.keys())
+    # Build the set of already-known file IDs so we don't re-scan them.
+    # Quarantined assets count as known. Their fileid is hash(original folder +
+    # filename) and quarantining deliberately keeps that original folder, so a
+    # file still sitting in repo/ under the same name would otherwise be
+    # rediscovered as new — putting one fileid in two buckets at once and
+    # listing the asset under both NEW and QUARANTINED.
+    current_fileids = set().union(
+        tracked_repo_assets.keys(), untracked_repo_assets.keys(),
+        tracked_quar_assets.keys(), untracked_quar_assets.keys(),
+    )
 
     i = 0
     progress_qty = len(repo_files) * 2  # x2: one pass for scanning, one for validation
