@@ -303,23 +303,87 @@ function fps_formatter(cell) {
   return fail ? qc_span(framerate, qc_config.fps.join(" or ")) : escape_html(framerate);
 }
 
+// Free-text "contains" filter (case-insensitive).
+const TEXT_FILTER = {
+  headerFilter: "input",
+  headerFilterFunc: "like",
+  headerFilterPlaceholder: "filter",
+};
+
+// Dropdown built from the values actually present in the scan. valuesLookup
+// reads the full data set, not the filtered subset, so narrowing on one column
+// never removes options from another column's list.
+const LIST_FILTER = {
+  headerFilter: "list",
+  headerFilterParams: { valuesLookup: true, clearable: true },
+  headerFilterPlaceholder: "all",
+};
+
+// ── Numeric filters with comparison operators ────────────────────────────────
+// Accepts "2992" (exact), "> 3000", ">=3000", "<3000", "<=3000" and "!=1080".
+// A bare number matches exactly, within a small tolerance so fractional values
+// like 23.976 fps can be typed literally.
+
+const OPERATOR_PATTERN = /^\s*(>=|<=|!=|>|<|=)?\s*(-?\d*\.?\d+)\s*$/;
+
+function operator_match(input, value, scale) {
+  const parsed = OPERATOR_PATTERN.exec(String(input));
+  if (!parsed) return true;  // mid-typing or nonsense — don't hide anything yet
+
+  const target = parseFloat(parsed[2]);
+  if (!isFinite(target)) return true;
+
+  // Reject empties before coercing: Number(null) and Number("") are both 0, so
+  // an audio file with no width would otherwise match a "<1000" width filter.
+  if (value === null || value === undefined || value === "") return false;
+  const number = Number(value) / (scale || 1);
+  if (!isFinite(number)) return false;  // non-numeric — filtered out
+
+  switch (parsed[1]) {
+    case ">":  return number > target;
+    case "<":  return number < target;
+    case ">=": return number >= target;
+    case "<=": return number <= target;
+    case "!=": return Math.abs(number - target) >= 0.001;
+    default:   return Math.abs(number - target) < 0.001;  // bare number or "="
+  }
+}
+
+// field: read the raw numeric twin instead of the displayed value (size_bytes
+// for "1.2 GiB", duration_ms for "00:01:30:00"). scale: divide the raw value so
+// the user types familiar units (MiB, seconds) rather than bytes or ms.
+function operator_filter(field, scale) {
+  return function(header_value, row_value, row_data) {
+    return operator_match(header_value, field ? row_data[field] : row_value, scale);
+  };
+}
+
+function number_filter(field, scale, placeholder) {
+  return {
+    headerFilter: "input",  // not "number": the input must accept > and <
+    headerFilterFunc: operator_filter(field, scale),
+    headerFilterPlaceholder: placeholder || "= > <",
+    minWidth: 80,
+  };
+}
+
 function asset_columns() {
   return [
-    { title: "Folder",        field: "parent",         formatter: folder_formatter, maxInitialWidth: 260 },
-    { title: "Name",          field: "name",           formatter: name_formatter,   maxInitialWidth: 340 },
-    { title: "Screen / Stem", field: "screen",         sorter: screen_sorter,       maxInitialWidth: 180 },
-    { title: "Version",       field: "version",        formatter: version_formatter, sorter: "alphanum" },
-    { title: "Ext",           field: "extension" },
-    { title: "Duration",      field: "duration",       sorter: raw_number_sorter("duration_ms") },
-    { title: "Codec",         field: "video_codec",    formatter: codec_formatter },
-    { title: "Width",         field: "width",          formatter: resolution_formatter("w"), sorter: "number" },
-    { title: "Height",        field: "height",         formatter: resolution_formatter("h"), sorter: "number" },
-    { title: "FPS",           field: "framerate",      formatter: fps_formatter,             sorter: "number" },
-    { title: "Audio",         field: "audio" },
-    { title: "Rate",          field: "audio_rate",     sorter: "number" },
-    { title: "Bits",          field: "audio_bits",     sorter: "number" },
-    { title: "Ch",            field: "audio_channels", sorter: "number" },
-    { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes"), minWidth: 90 },
+    { title: "Folder",        field: "parent",         formatter: folder_formatter,  maxInitialWidth: 260, ...TEXT_FILTER },
+    { title: "Name",          field: "name",           formatter: name_formatter,    maxInitialWidth: 340, ...TEXT_FILTER },
+    { title: "Screen / Stem", field: "screen",         sorter: screen_sorter,        maxInitialWidth: 180, ...LIST_FILTER },
+    { title: "Version",       field: "version",        formatter: version_formatter, sorter: "alphanum",   ...LIST_FILTER },
+    { title: "Ext",           field: "extension",      ...LIST_FILTER },
+    { title: "Duration",      field: "duration",       sorter: raw_number_sorter("duration_ms"), ...number_filter("duration_ms", 1000, "= > < sec") },
+    { title: "Codec",         field: "video_codec",    formatter: codec_formatter,   ...LIST_FILTER },
+    { title: "Width",         field: "width",          formatter: resolution_formatter("w"), sorter: "number", ...number_filter() },
+    { title: "Height",        field: "height",         formatter: resolution_formatter("h"), sorter: "number", ...number_filter() },
+    { title: "FPS",           field: "framerate",      formatter: fps_formatter,             sorter: "number", ...number_filter() },
+    { title: "Audio",         field: "audio",          ...LIST_FILTER },
+    { title: "Rate",          field: "audio_rate",     sorter: "number", ...number_filter() },
+    { title: "Bits",          field: "audio_bits",     sorter: "number", ...number_filter() },
+    { title: "Ch",            field: "audio_channels", sorter: "number", ...number_filter() },
+    { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes"), ...number_filter("size_bytes", 1048576, "= > < MiB"), minWidth: 95 },
   ];
 }
 
@@ -376,6 +440,9 @@ function render_asset_table(assets_by_id) {
     rowHeader: {
       formatter: "rowSelection",
       titleFormatter: "rowSelection",
+      // "active" = rows passing the current filters. Without this the header
+      // checkbox selects every row in the table, including filtered-out ones.
+      titleFormatterParams: { rowRange: "active" },
       headerSort: false,
       resizable: false,
       frozen: true,
@@ -385,6 +452,31 @@ function render_asset_table(assets_by_id) {
       cellClick: function(e, cell) { cell.getRow().toggleSelect(); },
     },
   });
+
+  // Selection survives a filter change, so a row can be selected while hidden.
+  // Show the count next to the action buttons to keep that honest.
+  asset_table.on("rowSelectionChanged", () => update_selection_count());
+  // dataFiltered is dispatched from *inside* Tabulator's filter routine, before
+  // the filtered set is assigned to activeRows — so getRows("active") is one
+  // filter-change stale in here. The event's second argument is the fresh set.
+  asset_table.on("dataFiltered", (filters, rows) => update_selection_count(rows));
+}
+
+// "12 selected" / "12 selected (3 hidden by filter)" / "" when nothing is picked.
+// active_rows may be supplied by a caller that has a fresher set than the table.
+function update_selection_count(active_rows) {
+  if (!asset_table) return;
+  const selected = asset_table.getSelectedRows();
+  if (!selected.length) {
+    $('#selection_count').text("");
+    return;
+  }
+  const visible = new Set(active_rows || asset_table.getRows("active"));
+  const hidden = selected.filter(row => !visible.has(row)).length;
+  $('#selection_count').text(
+    hidden ? `${selected.length} selected (${hidden} hidden by filter)`
+           : `${selected.length} selected`
+  );
 }
 
 

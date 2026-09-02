@@ -181,13 +181,28 @@ Tuned for the stated priority: hundreds of rows, scannable at a glance, QC flags
 - density → `.tabulator-row .tabulator-cell` padding + `.tabulator-row` min-height
 - if the QC chip reads as too busy → drop `background-color`/`padding` from `.qc-fail`, keeping the colour and weight
 
+**Follow-up tweaks after review (all committed with the theme):**
+- Font up to `0.78rem` body / `0.70rem` headers, stripe contrast up to `#1b1b1b` vs `#272727` — two rounds of nudging from the initial values.
+- Vertical breathing room: cell padding `3px 5px`, row min-height 20px. Icon-to-text gap `6px` via `.cell-icon` margin.
+- **`layout: "fitDataFill"` → `"fitDataStretch"`** — manual column resizes were snapping back. The `fitData`/`fitDataFill`/`fitDataTable` layouts share one function that calls `reinitializeWidth()` *unconditionally*, and that method starts with `this.widthFixed = false`, wiping the manual width. `fitDataStretch` is the only variant that guards it (`e.widthFixed || e.reinitializeWidth()`). Side effect: the last visible column (Size) stretches to fill leftover width.
+- `maxInitialWidth` on Folder/Name/Screen (260/340/180) so one long filename can't blow out the initial layout; `minWidth: 90` on Size so its header is readable by default.
+- **Opaque frozen header cell** — the transparent-header rule left the sticky checkbox column see-through, so column headers scrolled visibly underneath it. Fixed with `#222` on `.tabulator-col.tabulator-row-header` (4-class selector, verified to beat the 3-class transparent rule).
+
 Suggested commit: `style: match tabulator theme to cn4m dark ui`
 
 ---
 
 ## Phase 6 — The payoff features (one commit each, any order)
 
-- [ ] **Header filters:** text filter on Folder/Name; `list`-editor dropdowns for Ext, Screen, Codec (values built from data); numeric `>=`-style filters on Width/Height/FPS. Verify actions operate on *selected* rows, not filtered-visible rows, and that "select all" while filtered only selects visible rows (Tabulator default — confirm it matches what we want).
+- [x] **Header filters** *(done — needs testing)*: contains-filter on Folder/Name, `list` dropdowns on Screen/Ext/Codec (`valuesLookup: true`, built from the full data set so narrowing one column never removes options from another), `>=` number filters on Width/Height/FPS.
+  - **Select-all is NOT filter-aware by default** — the header checkbox calls `selectRow(rowRange)` and with no `rowRange` that resolves to *every* row in the table. Set `titleFormatterParams: { rowRange: "active" }` to get the agreed visible-only behaviour. (`"visible"` would have been wrong too — under the virtual DOM that means only rows rendered in the viewport.)
+  - `sortValuesList` and other params from older docs don't exist in 6.5.2; verified every param against the bundle before using it. Dropdown values therefore come in data order.
+  - Header filter inputs restyled — the theme ships them light (`#444` on `#999`), which clashed badly with the flat dark UI.
+  - **Follow-up: counter was one filter-change stale.** `dataFiltered` is dispatched from *inside* Tabulator's filter routine, before the filtered set is assigned to `activeRows` — so `getRows("active")` in that handler reads the *previous* filter state. The event's second argument carries the fresh set; `update_selection_count()` now takes it as a parameter and falls back to querying the table when called from `rowSelectionChanged`.
+  - **Follow-up: every column is now filterable**, and the numeric ones take comparison operators — `2992` (exact), `>3000`, `>=3000`, `<3000`, `<=3000`, `!=1080`. Implemented as a custom `headerFilterFunc` over an `input` filter (a `number` input won't accept `>`). Duration and Size filter against their raw fields in familiar units — seconds and MiB — rather than ms and bytes.
+    - Empty values are excluded from numeric filters. This needed an explicit guard: `Number(null)` and `Number("")` are both `0`, so an audio file with no width would otherwise have matched a `<1000` width filter. Caught by test, not by eye.
+    - A partially typed filter (`>` alone, or junk) hides nothing rather than emptying the table mid-keystroke.
+  - **Added a selection counter** next to the action buttons: selection survives a filter change, so a row can be selected while hidden. It reads `12 selected (3 hidden by filter)` when that happens — approve/quarantine move real files, so silent hidden selections were worth guarding against. Drop the `#selection_count` span and its two handlers if it's noise.
 - [ ] **QC filter:** stamp each row with a computed `qc_fail: true/false` during transform; add a "show failing only" toggle button next to the audio buttons.
 - [ ] **Persistence:** `persistence: {sort: true, filter: true, columns: true}` + `persistenceID: "cn4m-review"` (localStorage). Verify a stale persisted layout doesn't hide new columns.
 - [ ] **Spreadsheet feel:** `selectableRange`, `clipboard: true` for copy-out to Sheets/Excel. Confirm range-select doesn't fight row-selection checkboxes (Tabulator 6 supports both; test click interactions carefully).

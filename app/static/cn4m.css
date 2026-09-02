@@ -182,6 +182,62 @@ body {
 	border-top: 4px solid #F99D38;
 }
 
+/* Header filter inputs — the theme ships them light (#444 on a #999 border);
+   restyle to match the flat dark UI and the smaller header type. */
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input,
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter select {
+	background: #1a1a1a;
+	border: 1px solid #3a3a3a;
+	border-radius: 3px;
+	color: #cfcfcf;
+	font-size: 0.68rem;
+	font-weight: 300;
+	padding: 1px 4px !important;
+	outline: none;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input:focus,
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter select:focus {
+	border-color: #F99D38;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input::placeholder {
+	color: #5a5a5a;
+}
+
+/* number inputs: drop the spinners, they eat width in narrow spec columns */
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input[type="number"] {
+	-moz-appearance: textfield;
+	appearance: textfield;
+}
+
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input[type="number"]::-webkit-outer-spin-button,
+.tabulator .tabulator-header .tabulator-col .tabulator-header-filter input[type="number"]::-webkit-inner-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+/* the list filter's dropdown menu */
+.tabulator-menu.tabulator-edit-list {
+	background: #222;
+	border: 1px solid #3a3a3a;
+	color: #cfcfcf;
+	font-size: 0.72rem;
+	font-weight: 300;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item {
+	color: #cfcfcf;
+	padding: 3px 6px;
+}
+
+.tabulator-edit-list .tabulator-edit-list-item.active,
+.tabulator-edit-list .tabulator-edit-list-item:hover,
+.tabulator-edit-list .tabulator-edit-list-item.focused {
+	background: #F99D38;
+	color: #1a1a1a;
+}
+
 /* Rows — darker than the #222 panel so the table reads as recessed, with
    striping just strong enough to track across 16 columns */
 .tabulator-row {
