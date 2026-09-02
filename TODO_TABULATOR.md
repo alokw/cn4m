@@ -72,13 +72,24 @@ Suggested commit: `refactor: keep scan results in a JS data store instead of the
 
 ---
 
-## Phase 2 — Vendor Tabulator (inert)
+## Phase 2 — Vendor Tabulator *(code done — needs page-load check)*
 
-- [ ] Download Tabulator 6.x into `app/static/`: `tabulator.min.js` + `tabulator_midnight.min.css` (record the exact version in this file and the README).
-- [ ] Add `<script>`/`<link>` tags to `templates/index.html` (after Bootstrap, before `cn4m.css` so our overrides win).
-- [ ] Do **not** use it yet.
+- [x] **Tabulator 6.5.2** vendored into `app/static/` (MIT, zero dependencies — confirmed against the npm registry):
+  - `tabulator.min.js` (436K, the **full** build — the core-only build is roughly a third the size, so all modules we need are included)
+  - `tabulator_midnight.min.css` (30K, dark theme)
+  - `tabulator.LICENSE.txt` — MIT license text kept alongside the code, since the repo is headed for open-sourcing
+- [x] Wired into `app/templates/index.html`: script after `bootstrap.bundle.min.js` and **before** `cn4m.js`; stylesheet after `bootstrap.min.css` and **before** `cn4m.css`, so our overrides win the cascade in Phase 5.
+- [x] Not used by any code yet — the table still renders exactly as before.
 
-**Test:** page loads; `typeof Tabulator === "function"` in console; no console errors; existing UI unchanged (no style bleed from the theme css). Commit: `chore: vendor tabulator 6.x`.
+**Automated checks:**
+- `Tabulator` registers as a browser global (`typeof Tabulator === "function"`) when loaded in a clean browser-like sandbox with no CommonJS `module`/`exports` in scope.
+- **No style bleed:** every selector in the theme CSS is scoped under `.tabulator` — parsed the whole file and found zero unscoped selectors, so it cannot touch the existing UI.
+- All static filenames referenced by `index.html` resolve to real files.
+- `.gitignore` does not exclude the new files; the Dockerfile's `COPY . .` picks them up with no build step.
+
+**Test:** hard-refresh http://localhost:5000. Expect: page looks **completely unchanged**, no console errors, and `typeof Tabulator` in the console returns `"function"`.
+
+Suggested commit: `chore: vendor tabulator 6.5.2`
 
 ---
 
