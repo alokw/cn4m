@@ -22,6 +22,9 @@
 #       e.g. {framerate} resolves to the project's target framerate
 #     - Per-asset metadata fields are available as fallback
 #       e.g. {width}, {height}, {video_codec}, {audio_rate}, etc.
+#     - {source_framerate} is the special case: it always resolves to the source
+#       file's own framerate, ignoring the project target. If the source has no
+#       video track (a .wav, say) it falls back to the project framerate.
 #
 #   inputs:
 #     - file:       path or ffmpeg source string (e.g. "color=c=black:s=16x16" for synthetic inputs)
@@ -70,7 +73,7 @@ presets:
           vcodec: "hap"
           acodec: "pcm_s16le"
           format: "mov"
-          vf: "fps={framerate}"
+          vf: "fps={source_framerate}"
           ar: 48000
           ac: 2
     global_args: []
@@ -92,7 +95,7 @@ presets:
           vcodec: "hap"
           acodec: "pcm_s16le"
           format: "mov"
-          vf: "fps={framerate}"
+          vf: "fps={source_framerate}"
           ar: 48000
           shortest: null
     global_args: []
@@ -114,7 +117,7 @@ presets:
           vcodec: "hap"
           acodec: "pcm_s16le"
           format: "mov"
-          vf: "fps={framerate}"
+          vf: "fps={source_framerate}"
           ar: 48000
           af: "pan=stereo|c0=c0|c1=0*c0"
           shortest: null
@@ -137,7 +140,7 @@ presets:
           vcodec: "hap"
           acodec: "pcm_s16le"
           format: "mov"
-          vf: "fps={framerate}"
+          vf: "fps={source_framerate}"
           ar: 48000
           af: "pan=stereo|c0=0*c0|c1=c0"
           shortest: null
@@ -156,6 +159,7 @@ presets:
         extension: "mp4"
         options:
           vcodec: "libx264"
+          vf: "fps={source_framerate}"
           crf: "23"
           preset: "medium"
           acodec: "aac"
@@ -183,26 +187,6 @@ presets:
     global_args: []
 
 
-
-  # ── Convert to HAP ────────────────────────────────────────────────────────────
-  # Re-encodes the file as HAP with stereo PCM audio.
-
-  - name: convert_to_hap
-    label: "Convert to HAP"
-    description: "Exports a HAP file."
-    inputs:
-      - file: null
-    outputs:
-      - suffix: "_hap"
-        extension: "mov"
-        options:
-          vcodec: "hap"
-          acodec: "pcm_s16le"
-          format: "hap"
-          ar: 48000
-          vf: "fps={framerate}"
-          ac: 2
-    global_args: []
 
   # ── Convert Still to EXR (RLE) ────────────────────────────────────────────────
   # Converts a still image (png/jpg/tif/dpx/…) to a half-float RGBA OpenEXR with

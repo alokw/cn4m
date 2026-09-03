@@ -202,16 +202,22 @@ def run_ffmpeg_preset(preset, src_path, asset_data=None):
     p = Path(src_path)
     out_path = str(p.parent / (p.stem + output_config['suffix'] + '.' + output_config['extension']))
 
-    options = {}
     project_config = load_project_config()
+    subs = {}
+    if asset_data:
+        subs.update({k: v for k, v in asset_data.items() if v is not None})
+    # {source_framerate} is the fps of the asset itself — captured before the
+    # project config overwrites {framerate} with the project's target rate.
+    # Audio-only sources have no video track, so fall back to the project value.
+    source_framerate = subs.get('framerate')
+    subs.update({k: v for k, v in project_config.items() if v is not None})
+    if 'framerate' in subs:
+        subs['framerate'] = ffmpeg_framerate(subs['framerate'])
+    subs['source_framerate'] = ffmpeg_framerate(source_framerate) if source_framerate is not None else subs.get('framerate', ffmpeg_framerate(None))
+
+    options = {}
     for key, value in output_config['options'].items():
         if isinstance(value, str):
-            subs = {}
-            if asset_data:
-                subs.update({k: v for k, v in asset_data.items() if v is not None})
-            subs.update({k: v for k, v in project_config.items() if v is not None})
-            if 'framerate' in subs:
-                subs['framerate'] = ffmpeg_framerate(subs['framerate'])
             value = value.format(**subs)
         options[key] = value
 
