@@ -40,7 +40,7 @@ To stop: `docker compose down`. A Celery task dashboard (Flower) is also availab
 2. **Review** — Displays all new assets in a sortable, filterable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec, resolution, or framerate) are highlighted red, and a single button narrows the table to just the flagged assets. A delivery that arrives at a version you have already approved gets a caution icon, and anything misnamed can be renamed in place from the table. See [Reviewing assets](#reviewing-assets).
 3. **Approve or Quarantine** — Approved files stay in place and are ready to track. Quarantined files are physically moved to a separate folder for manual review.
 4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`. QC failures are highlighted red in the sheet too.
-5. **Transcode** — Runs selected assets through configurable ffmpeg presets (HAP, H.264 proxies, WAV extraction, audio-to-HAP wrapping for disguise/d3 media servers), optionally quarantining the originals afterward. Available on new assets and on anything already approved or quarantined.
+5. **Transcode** — Runs selected assets through configurable ffmpeg presets (Hap, Hap Alpha, 1/2–1/8-res Hap Alpha proxies, H.264 proxies, WAV extraction, audio-to-Hap wrapping for disguise/d3 media servers), optionally quarantining the originals afterward. Available on new assets and on anything already approved or quarantined.
 
 Optionally, cn4m posts a summary to a Discord channel whenever files are approved, quarantined, or pushed to the sheet.
 
@@ -158,7 +158,7 @@ The version field also drives the caution icon in the review table, which fires 
 
 ### Transcode presets
 
-The **TRANSCODE** and **QUARANTINE & TRANSCODE** buttons run the selected assets through an ffmpeg preset chosen from the dropdown. Presets are defined in [config/ffmpeg_config.yaml](config/ffmpeg_config.yaml) — the file is heavily commented and ships with presets for HAP transcodes, H.264 review proxies, WAV audio extraction, and wrapping audio files in a tiny 16×16 HAP `.mov` (so disguise/d3 media servers can play them back as standard video assets). Adding your own preset is a copy-paste-edit of an existing block; no code changes needed.
+The **TRANSCODE** and **QUARANTINE & TRANSCODE** buttons run the selected assets through an ffmpeg preset chosen from the dropdown. Presets are defined in [config/ffmpeg_config.yaml](config/ffmpeg_config.yaml) — the file is heavily commented and ships with presets for Hap and Hap Alpha transcodes, 1/2, 1/4 and 1/8-resolution Hap Alpha proxies (`_proxy1` / `_proxy2` / `_proxy3`, padded up to a multiple of 16, at the source framerate), H.264 review proxies, WAV audio extraction, and wrapping audio files in a tiny 16×16 Hap `.mov` (so disguise/d3 media servers can play them back as standard video assets). Adding your own preset is a copy-paste-edit of an existing block; no code changes needed.
 
 Preset options can reference `{field}` tokens (like `{framerate}`) that are filled in at runtime from [config/project_config.yaml](config/project_config.yaml) or from the asset's own metadata. Both YAML files are read fresh on every transcode, so edits take effect without a restart.
 

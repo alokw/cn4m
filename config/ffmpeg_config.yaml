@@ -6,7 +6,8 @@
 # HOW TO ADD A NEW PRESET
 # ──────────────────────
 # 1. Copy an existing preset block (everything from "- name:" down to its last option).
-# 2. Paste it below the last preset.
+# 2. Paste it into place — presets are kept sorted by 'label', so the file
+#    reads in the same order as the web app's preset dropdown.
 # 3. Fill in the fields:
 #      name        — short identifier used in the web app (no spaces, use underscores)
 #      label       — human-readable name shown on buttons/menus
@@ -58,51 +59,150 @@
 
 presets:
 
-  # ── Transcode Video to HAP ───────────────────────────────────────────────────
-  # Re-encodes a video file to HAP with stereo PCM audio, keeping the picture.
+  # ── Convert Still to EXR (uncompressed) ───────────────────────────────────────
+  # Converts a still image (png/jpg/tif/dpx/…) to a half-float RGBA OpenEXR,
+  # storing the pixels uncompressed. Also safe to point at a video: it takes the
+  # first frame only.
 
-  - name: transcode_hap
-    label: "Transcode Video to HAP"
-    description: "Creates a HAP-encoded .mov from the existing file."
+  - name: convert_to_exr_none
+    label: "Convert to EXR (no compression)"
+    description: "Exports an uncompressed half-float RGBA OpenEXR still."
+    inputs:
+      - file: null
+    outputs:
+      - suffix: "_exr"
+        extension: "exr"
+        options:
+          vcodec: "exr"
+          # "format" is the EXR encoder's own option (half | float), NOT the
+          # container format. It MUST be written with the ":v" stream specifier —
+          # a bare "format" key is interpreted as ffmpeg's -f container flag.
+          "format:v": "half"
+          compression: "none"
+          pix_fmt: "gbrapf32le"
+          "frames:v": 1                   # one image out (first frame if given a video)
+          update: 1                       # allow a single image to a plain (non-%04d) filename
+          an: null                        # EXR holds no audio; drop any audio track
+    global_args: []
+
+  # ── Create HapA Proxy (1/2 Rez) ──────────────────────────────────────────────
+  # Lower-resolution stand-in at 1/2 of each dimension, keeping the source
+  # framerate. Padded up to the next multiple of 16 rather than scaled to it —
+  # scaling to a "nice" number would change the aspect ratio, whereas padding
+  # leaves the picture untouched and just adds margin. Hap compresses in 4x4
+  # blocks and hardware decode is happiest on multiples of 16, so 16 covers both
+  # the 8 and the 16 case. The margin goes bottom/right (offsets 0:0 hold the
+  # image at the top-left, so the origin is preserved and UV mapping doesn't
+  # shift) and is transparent rather than opaque black, so it reads as "not part
+  # of the image" in an alpha format.
+  #
+  # 1920x1080 -> 960x544  (960x540 padded)
+
+  - name: proxy_hapa_2
+    label: "Create HapA Proxy (1/2 Rez)"
+    description: "1/2-resolution Hap Alpha proxy, padded to a multiple of 16, at the source framerate."
     inputs:
       - file: null                        # null means "use the selected asset's file path"
     outputs:
-      - suffix: "_hap"
+      - suffix: "_proxy1"
         extension: "mov"
         options:
           vcodec: "hap"
-          acodec: "pcm_s16le"
+          # The Hap variant is the encoder's OWN "format" option, so it needs the
+          # ":v" stream specifier — a bare "format" key is ffmpeg's -f container
+          # flag (which is why "format: mov" below is a different setting).
+          "format:v": "hap_alpha"
           format: "mov"
-          vf: "fps={source_framerate}"
+          pix_fmt: "rgba"                 # the hap encoder accepts rgba only
+          # fps first, then divide each dimension, then pad up to the next
+          # multiple of 16. Inside pad, iw/ih are the *scaled* dimensions.
+          vf: "fps={source_framerate},scale=trunc(iw/2):trunc(ih/2),format=rgba,pad=ceil(iw/16)*16:ceil(ih/16)*16:0:0:black@0"
+          acodec: "pcm_s16le"             # audio conformed to spec, as the other Hap presets do
           ar: 48000
           ac: 2
     global_args: []
-          
-  - name: extract_hap_audio
-    label: "Extract Audio to 16x16 HAP - Stereo"
-    description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
+
+  # ── Create HapA Proxy (1/4 Rez) ──────────────────────────────────────────────
+  # Lower-resolution stand-in at 1/4 of each dimension, keeping the source
+  # framerate. Padded up to the next multiple of 16 rather than scaled to it —
+  # scaling to a "nice" number would change the aspect ratio, whereas padding
+  # leaves the picture untouched and just adds margin. Hap compresses in 4x4
+  # blocks and hardware decode is happiest on multiples of 16, so 16 covers both
+  # the 8 and the 16 case. The margin goes bottom/right (offsets 0:0 hold the
+  # image at the top-left, so the origin is preserved and UV mapping doesn't
+  # shift) and is transparent rather than opaque black, so it reads as "not part
+  # of the image" in an alpha format.
+  #
+  # 1920x1080 -> 480x272  (480x270 padded)
+
+  - name: proxy_hapa_4
+    label: "Create HapA Proxy (1/4 Rez)"
+    description: "1/4-resolution Hap Alpha proxy, padded to a multiple of 16, at the source framerate."
     inputs:
-      - file: "color=c=black:s=16x16"
-        format: "lavfi"
       - file: null                        # null means "use the selected asset's file path"
     outputs:
-      - suffix: "_hapaudio"
+      - suffix: "_proxy2"
         extension: "mov"
-        map:                              # video from input 0 (16x16 black), audio from input 1 (the media file)
-          - "0:v"
-          - "1:a"
         options:
           vcodec: "hap"
-          acodec: "pcm_s16le"
+          # The Hap variant is the encoder's OWN "format" option, so it needs the
+          # ":v" stream specifier — a bare "format" key is ffmpeg's -f container
+          # flag (which is why "format: mov" below is a different setting).
+          "format:v": "hap_alpha"
           format: "mov"
-          vf: "fps={source_framerate}"
+          pix_fmt: "rgba"                 # the hap encoder accepts rgba only
+          # fps first, then divide each dimension, then pad up to the next
+          # multiple of 16. Inside pad, iw/ih are the *scaled* dimensions.
+          vf: "fps={source_framerate},scale=trunc(iw/4):trunc(ih/4),format=rgba,pad=ceil(iw/16)*16:ceil(ih/16)*16:0:0:black@0"
+          acodec: "pcm_s16le"             # audio conformed to spec, as the other Hap presets do
           ar: 48000
-          shortest: null
+          ac: 2
     global_args: []
 
+  # ── Create HapA Proxy (1/8 Rez) ──────────────────────────────────────────────
+  # Lower-resolution stand-in at 1/8 of each dimension, keeping the source
+  # framerate. Padded up to the next multiple of 16 rather than scaled to it —
+  # scaling to a "nice" number would change the aspect ratio, whereas padding
+  # leaves the picture untouched and just adds margin. Hap compresses in 4x4
+  # blocks and hardware decode is happiest on multiples of 16, so 16 covers both
+  # the 8 and the 16 case. The margin goes bottom/right (offsets 0:0 hold the
+  # image at the top-left, so the origin is preserved and UV mapping doesn't
+  # shift) and is transparent rather than opaque black, so it reads as "not part
+  # of the image" in an alpha format.
+  #
+  # 1920x1080 -> 240x144  (240x135 padded)
+
+  - name: proxy_hapa_8
+    label: "Create HapA Proxy (1/8 Rez)"
+    description: "1/8-resolution Hap Alpha proxy, padded to a multiple of 16, at the source framerate."
+    inputs:
+      - file: null                        # null means "use the selected asset's file path"
+    outputs:
+      - suffix: "_proxy3"
+        extension: "mov"
+        options:
+          vcodec: "hap"
+          # The Hap variant is the encoder's OWN "format" option, so it needs the
+          # ":v" stream specifier — a bare "format" key is ffmpeg's -f container
+          # flag (which is why "format: mov" below is a different setting).
+          "format:v": "hap_alpha"
+          format: "mov"
+          pix_fmt: "rgba"                 # the hap encoder accepts rgba only
+          # fps first, then divide each dimension, then pad up to the next
+          # multiple of 16. Inside pad, iw/ih are the *scaled* dimensions.
+          vf: "fps={source_framerate},scale=trunc(iw/8):trunc(ih/8),format=rgba,pad=ceil(iw/16)*16:ceil(ih/16)*16:0:0:black@0"
+          acodec: "pcm_s16le"             # audio conformed to spec, as the other Hap presets do
+          ar: 48000
+          ac: 2
+    global_args: []
+
+  # ── Extract Audio to 16x16 Hap ────────────────────────────────────────────────
+  # Wraps a file's audio in a tiny black Hap .mov, so disguise/d3 media servers
+  # can play audio back as a standard video asset. Three channel variants.
+
   - name: extract_hap_audio_left
-    label: "Extract Audio to 16x16 HAP - Mono L (VO / Narration)"
-    description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
+    label: "Extract Audio to 16x16 Hap - Mono L (VO / Narration)"
+    description: "Creates a Hap-encoded .mov from the file's audio track (16x16 black video)."
     inputs:
       - file: "color=c=black:s=16x16"
         format: "lavfi"
@@ -124,8 +224,8 @@ presets:
     global_args: []
 
   - name: extract_hap_audio_right
-    label: "Extract Audio to 16x16 HAP - Mono R (Dialogue)"
-    description: "Creates a HAP-encoded .mov from the file's audio track (16x16 black video)."
+    label: "Extract Audio to 16x16 Hap - Mono R (Dialogue)"
+    description: "Creates a Hap-encoded .mov from the file's audio track (16x16 black video)."
     inputs:
       - file: "color=c=black:s=16x16"
         format: "lavfi"
@@ -144,6 +244,46 @@ presets:
           ar: 48000
           af: "pan=stereo|c0=0*c0|c1=c0"
           shortest: null
+    global_args: []
+
+  - name: extract_hap_audio
+    label: "Extract Audio to 16x16 Hap - Stereo"
+    description: "Creates a Hap-encoded .mov from the file's audio track (16x16 black video)."
+    inputs:
+      - file: "color=c=black:s=16x16"
+        format: "lavfi"
+      - file: null                        # null means "use the selected asset's file path"
+    outputs:
+      - suffix: "_hapaudio"
+        extension: "mov"
+        map:                              # video from input 0 (16x16 black), audio from input 1 (the media file)
+          - "0:v"
+          - "1:a"
+        options:
+          vcodec: "hap"
+          acodec: "pcm_s16le"
+          format: "mov"
+          vf: "fps={source_framerate}"
+          ar: 48000
+          shortest: null
+    global_args: []
+
+  # ── Extract WAV Audio ─────────────────────────────────────────────────────────
+  # Strips the audio track(s) into a standalone WAV file.
+
+  - name: extract_wav
+    label: "Extract Audio to WAV"
+    description: "Exports audio as a 48kHz 16-bit stereo WAV file."
+    inputs:
+      - file: null
+    outputs:
+      - suffix: "_audio"
+        extension: "wav"
+        options:
+          acodec: "pcm_s16le"
+          ar: 48000
+          ac: 2
+          vn: null
     global_args: []
 
   # ── Transcode to H.264 ────────────────────────────────────────────────────────
@@ -167,52 +307,51 @@ presets:
           ac: 2
     global_args: []
 
+  # ── Transcode to Hap ──────────────────────────────────────────────────────────
+  # Re-encodes a video file to Hap with stereo PCM audio, keeping the picture at
+  # its delivered resolution. See "Transcode to Hap Alpha" below for the variant
+  # that carries an alpha channel.
 
-  # ── Extract WAV Audio ─────────────────────────────────────────────────────────
-  # Strips the audio track(s) into a standalone WAV file.
-
-  - name: extract_wav
-    label: "Extract WAV"
-    description: "Exports audio as a 48kHz 16-bit stereo WAV file."
+  - name: transcode_hap
+    label: "Transcode to Hap"
+    description: "Creates a Hap-encoded .mov from the existing file."
     inputs:
-      - file: null
+      - file: null                        # null means "use the selected asset's file path"
     outputs:
-      - suffix: "_audio"
-        extension: "wav"
+      - suffix: "_hap"
+        extension: "mov"
         options:
+          vcodec: "hap"
           acodec: "pcm_s16le"
+          format: "mov"
+          vf: "fps={source_framerate}"
           ar: 48000
           ac: 2
-          vn: null
     global_args: []
 
+  # ── Transcode to Hap Alpha ────────────────────────────────────────────────────
+  # As above, but encodes Hap Alpha so a source with transparency keeps it. A
+  # source without an alpha channel comes out fully opaque, at a larger file size
+  # than plain Hap — use "Transcode to Hap" unless the transparency is wanted.
 
-
-  # ── Convert Still to EXR (RLE) ────────────────────────────────────────────────
-  # Converts a still image (png/jpg/tif/dpx/…) to a half-float RGBA OpenEXR with
-  # RLE compression. Also safe to point at a video: it takes the first frame only.
-
-  # ── Convert Still to EXR (uncompressed) ───────────────────────────────────────
-  # Same as the RLE preset above, but stores the pixels uncompressed — larger on
-  # disk (roughly 10x) in exchange for no decode cost on read.
-
-  - name: convert_to_exr_none
-    label: "Convert to EXR (no compression)"
-    description: "Exports an uncompressed half-float RGBA OpenEXR still."
+  - name: transcode_hap_alpha
+    label: "Transcode to Hap Alpha"
+    description: "Creates a Hap Alpha-encoded .mov from the existing file, keeping any transparency."
     inputs:
-      - file: null
+      - file: null                        # null means "use the selected asset's file path"
     outputs:
-      - suffix: "_exr"
-        extension: "exr"
+      - suffix: "_hapa"
+        extension: "mov"
         options:
-          vcodec: "exr"
-          # "format" is the EXR encoder's own option (half | float), NOT the
-          # container format. It MUST be written with the ":v" stream specifier —
-          # a bare "format" key is interpreted as ffmpeg's -f container flag.
-          "format:v": "half"
-          compression: "none"
-          pix_fmt: "gbrapf32le"
-          "frames:v": 1                   # one image out (first frame if given a video)
-          update: 1                       # allow a single image to a plain (non-%04d) filename
-          an: null                        # EXR holds no audio; drop any audio track
+          vcodec: "hap"
+          # The Hap variant is the encoder's OWN "format" option, so it needs the
+          # ":v" stream specifier — a bare "format" key is ffmpeg's -f container
+          # flag (which is why "format: mov" below is a different setting).
+          "format:v": "hap_alpha"
+          format: "mov"
+          pix_fmt: "rgba"                 # the hap encoder accepts rgba only
+          acodec: "pcm_s16le"
+          vf: "fps={source_framerate}"
+          ar: 48000
+          ac: 2
     global_args: []

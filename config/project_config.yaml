@@ -7,6 +7,26 @@
 # ─────────────
 # Just edit the values below and save. No restart needed — the file is
 # read fresh every time a transcode task runs.
+#
+# WHY THIS ISN'T IN .env
+# ──────────────────────
+# Two reasons:
+#
+#   1. A container's environment is fixed when it is created, so a value in
+#      .env can only be changed by recreating the stack (docker compose down,
+#      then up — a plain restart won't do it). This file is re-read inside
+#      run_ffmpeg_preset() on every single transcode, so a show changing its
+#      target framerate is an edit and a save, not a redeploy.
+#
+#   2. Every key here automatically becomes a {token} available to ffmpeg
+#      presets — helpers.py merges this whole file into the substitution dict.
+#      Adding {bitrate} or {lut_path} later is a line in this file and nothing
+#      else. Through .env each new value would need its own parser in code,
+#      the way QC_CODEC and QC_FPS do.
+#
+# The rough split: .env holds deployment config that is stable per install
+# (paths, credentials, ports, QC rules); this file holds per-show settings
+# that change between jobs and feed the preset templating.
 
 # Target framerate for all ffmpeg output files.
 # Common values: 23.976, 24, 25, 29.97, 30, 59.94, 60
