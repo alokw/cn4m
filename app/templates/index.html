@@ -20,6 +20,21 @@
 </head>
 <body>
 
+	<!-- Suite rail: cross-app navigation for the cn4m suite plus the app-level
+	     status line. Sits above the header so the page reads suite > app > view,
+	     and is styled quieter than the tab strip on purpose — the tabs below
+	     switch views inside cn4m, these links leave it. Contents are rendered by
+	     render_suite_rail() in cn4m.js; see SUITE_TOOLS there to add a tool. -->
+	<div class="obx-suite-rail">
+		<div class="container d-flex justify-content-between align-items-center">
+			<div class="obx-suite-links" id="suite-links"></div>
+			<div class="obx-app-status">
+				<span class="obx-status-dot" id="app-status-dot"></span>
+				<span id="app-status-text"></span>
+			</div>
+		</div>
+	</div>
+
 	<div class="container p-3 d-flex justify-content-between align-items-center">
 		<img class="" src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}">
 		<div class="obx-tabs">
@@ -149,6 +164,7 @@ $(function() { $('.obx-tab').click(function() { show_tab($(this).data('tab')); }
 $(function() { $('#repo-transcode').click(function() { transcode_browse('repo'); }); });
 $(function() { $('#quarantine-transcode').click(function() { transcode_browse('quarantine'); }); });
 $(wire_rename_dialog);
+$(render_suite_rail);
 $(load_ffmpeg_presets);
 $(load_qc_config);
 $(reveal_track_pane_if_pending);

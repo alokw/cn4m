@@ -112,6 +112,76 @@ body {
 }
 
 
+/* ── Suite rail ───────────────────────────────────────────────────────────────
+   Full-bleed band above the header carrying cross-app navigation for the cn4m
+   suite and the app-level status line. Quieter than the tab strip below it on
+   purpose: those buttons switch views inside cn4m, these links leave it, and
+   they should not read as a fourth tab. Contents come from render_suite_rail(). */
+
+.obx-suite-rail {
+	background-color: #141414;
+	border-bottom: 1px solid #2a2a2a;
+	font-size: 0.7625em;
+	line-height: 1;
+	padding: 0.55rem 0;
+}
+
+.obx-suite-links a {
+	color: #7a7a7a;
+	text-decoration: none;
+	font-weight: 500;
+	transition-duration: 0.3s;
+}
+
+.obx-suite-links a:hover {
+	color: #F99D38;
+}
+
+/* The tool doing the rendering — a "you are here", not a link */
+.obx-suite-current {
+	color: #dfdfdf;
+	font-weight: 600;
+}
+
+.obx-suite-sep {
+	color: #3a3a3a;
+	padding: 0 0.45rem;
+}
+
+.obx-app-status {
+	color: #7a7a7a;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-width: 0;        /* lets the text ellipsis rather than shove the links */
+	max-width: 55%;
+	padding-left: 1rem;
+}
+
+#app-status-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Idle is the unstyled default; set_app_status() adds a class for the others */
+.obx-status-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background-color: #4a4a4a;
+	flex: none;
+}
+
+.obx-status-working {
+	background-color: #F99D38;
+}
+
+.obx-status-error {
+	background-color: #ff6b6b;
+}
+
+
 /* ── Rename dialog ────────────────────────────────────────────────────────────
    Hand-rolled rather than a Bootstrap modal: the vendored Bootstrap CSS styles
    modals for a light page, and re-theming it costs more than the 30 lines here. */

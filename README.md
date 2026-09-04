@@ -64,6 +64,8 @@ The suite reserves the **264x** range so every tool can run side by side on one 
 
 Only the first three are configured here, in [docker-compose.yaml](docker-compose.yaml). 2640 is ours end to end — it's the port Flask itself listens on. 2641 and 2642 are host-side mappings onto the stock ports inside the Flower and Redis images (5555 and 6379), which are left alone: the containers talk to each other over the Docker network, so `CELERY_BROKER_URL=redis://redis:6379/0` names the *container* port and is deliberately unchanged.
 
+A thin rail across the top of the cn4m UI links to the other tools, marking cn4m itself as the one you're in. The links are built from the port plus `window.location.hostname`, so opening cn4m on the NAS from a laptop gives you links to the tools **on the NAS** — the list lives in `SUITE_TOOLS` at the top of [app/static/cn4m.js](app/static/cn4m.js), and adding a tool is one line. The right of that rail carries an app-level status line (`set_app_status()`), kept separate from the per-pane progress text.
+
 Publishing 2642 at all is only so you can inspect Redis from the host — the worker reaches it over the Docker network either way, and you can drop that mapping without affecting anything.
 
 **Upgrading from an earlier version?** The web GUI moved from 5000 to 2640 and Flower from 5555 to 2641, so `docker compose up -d` is required to republish the ports (a plain `restart` keeps the old mapping). Update any bookmarks.

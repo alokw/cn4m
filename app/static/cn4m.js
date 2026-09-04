@@ -105,6 +105,54 @@ function qc_resolution_fails(rules, width, height) {
   return best;
 }
 
+// ── cn4m suite rail ───────────────────────────────────────────────────────────
+// The suite's other tools, each served on its own port (see "The cn4m suite" in
+// the README). The port is the whole address: every link is built against
+// window.location.hostname, so opening cn4m on the NAS from a laptop yields
+// links to the tools ON THE NAS. A hardcoded localhost would instead point them
+// back at whatever machine the browser is running on, which is a confusing way
+// to fail — the links would look fine and quietly go nowhere.
+//
+// Adding a tool to the rail is one line here. "current" marks the app doing the
+// rendering, which reads as a "you are here" rather than a link; it's declared
+// rather than detected from location.port so the rail still marks itself
+// correctly if cn4m is ever fronted by a reverse proxy on 80/443.
+const SUITE_TOOLS = [
+  { name: "cn4m",      port: 2640, current: true },
+  { name: "inbound",   port: 2645 },
+  { name: "smartsync", port: 2646 },
+  { name: "symmetry",  port: 2647 },
+  { name: "cascade",   port: 2649 },
+];
+
+function render_suite_rail() {
+  const links = SUITE_TOOLS.map(function(tool) {
+    if (tool.current) {
+      return '<span class="obx-suite-current">' + escape_html(tool.name) + '</span>';
+    }
+    const url = window.location.protocol + "//" + window.location.hostname + ":" + tool.port + "/";
+    // New tab on purpose: switching tools shouldn't discard a review in progress.
+    return '<a href="' + escape_html(url) + '" target="_blank" rel="noopener">'
+      + escape_html(tool.name) + '</a>';
+  });
+  $('#suite-links').html(links.join('<span class="obx-suite-sep">·</span>'));
+  set_app_status("Ready");
+}
+
+// The status line at the right of the suite rail. Deliberately NOT a second home
+// for task progress — each pane already has its own progress text, and a status
+// bar that echoes them is just noise. This is for app-level state those can't
+// show: what's still waiting, what can't be reached.
+// level: "idle" (the default), "working", or "error" — it colours the dot.
+function set_app_status(text, level) {
+  const message = text || "";
+  $('#app-status-text').text(message).attr('title', message);
+  const dot = $('#app-status-dot').removeClass('obx-status-working obx-status-error');
+  if (level === "working") dot.addClass('obx-status-working');
+  if (level === "error") dot.addClass('obx-status-error');
+}
+
+
 // ── Button handlers ───────────────────────────────────────────────────────────
 // These are wired up to the buttons in index.html via $(function() { ... }) at
 // the bottom of that file.
@@ -989,7 +1037,15 @@ function reveal_track_pane() {
 // unreachable, so open it on load if anything is still waiting to be pushed.
 function reveal_track_pane_if_pending() {
   $.getJSON('/untracked_count', function(data) {
-    if (data && data.count > 0) reveal_track_pane();
+    const count = (data && data.count) || 0;
+    if (count > 0) reveal_track_pane();
+    // Seed the suite rail with something the per-pane progress lines don't say:
+    // what is still sitting between approval and the Google Sheet.
+    set_app_status(count
+      ? count + (count === 1 ? " asset" : " assets") + " waiting to be tracked"
+      : "Ready");
+  }).fail(function() {
+    set_app_status("Could not reach the cn4m server", "error");
   });
 }
 
