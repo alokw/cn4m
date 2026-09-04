@@ -13,7 +13,7 @@ git tag pre-tabulator && git push origin pre-tabulator
 
 Referred to below as **FULL CYCLE**:
 
-1. `docker compose up -d`, open http://localhost:5000, hard-refresh (Cmd+Shift+R).
+1. `docker compose up -d`, open http://localhost:2640, hard-refresh (Cmd+Shift+R).
 2. Drop a mix of files into `repo/`: a conforming video, a video with wrong codec, one with wrong resolution, one with wrong fps, an audio file, an image.
 3. **START** → table renders; row count matches files dropped; flags panel shows any invalid files.
 4. QC highlights: bad codec / width / height / fps cells are red with correct "Expected:" tooltips; conforming rows clean.
@@ -87,7 +87,7 @@ Suggested commit: `refactor: keep scan results in a JS data store instead of the
 - All static filenames referenced by `index.html` resolve to real files.
 - `.gitignore` does not exclude the new files; the Dockerfile's `COPY . .` picks them up with no build step.
 
-**Test:** hard-refresh http://localhost:5000. Expect: page looks **completely unchanged**, no console errors, and `typeof Tabulator` in the console returns `"function"`.
+**Test:** hard-refresh http://localhost:2640. Expect: page looks **completely unchanged**, no console errors, and `typeof Tabulator` in the console returns `"function"`.
 
 **Gotcha found during this phase — template caching.** `typeof Tabulator` came back `undefined` even though the file served fine (200, full 445,984 bytes). Cause: Flask was serving a *cached compiled template*, so the new `<script>` tag never reached the browser. `docker-compose.yaml` sets `FLASK_ENV=development`, but that variable has been a **no-op since Flask 2.3** (running 3.1.3 here), so `app.debug` was `False` and `jinja_env.auto_reload` with it. Static files (`.js`/`.css`) are read from disk per request — which is why the Phase 1 `cn4m.js` work appeared without a restart and this didn't.
 

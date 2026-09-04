@@ -28,7 +28,10 @@ let qc_filter_active = false;
 // localStorage key for the persisted column layout and sort. Bump the version
 // suffix whenever asset_columns() changes shape, so an old saved layout can't
 // mis-size or hide a newly added column.
-const PERSISTENCE_ID = "cn4m-review-v1";
+// -v2: bumped when the version conflict column was added at the far left. A
+// persisted -v1 layout knows nothing about it, and Tabulator appends unknown
+// columns to the end — which would bury the caution icon off the right edge.
+const PERSISTENCE_ID = "cn4m-review-v2";
 
 // The read-only REPO / QUARANTINE tables, built lazily the first time their tab
 // is opened. Same columns and machinery as the review table — see
@@ -309,6 +312,48 @@ function version_formatter(cell) {
   return `<img src="/static/icons/${icon}" alt="${alt}" title="${title}" class="cell-icon"> ${escape_html(cell.getValue())}`;
 }
 
+// Version conflict — the narrow caution column at the far left of the review
+// table. Measured only against assets already approved: "equal" means one of
+// those carries this exact version (typically the same cut in another
+// format), "higher" means this delivery is behind one. Two versions arriving
+// in the same dump are alternates and never flag each other; quarantined
+// assets are not peers either, since a redelivery is the expected fix.
+// Computed backend-side — see apply_version_flags in helpers.py.
+const CONFLICT_LABELS = {
+  equal:  "equal version already approved",
+  higher: "higher version already approved",
+};
+
+function conflict_formatter(cell) {
+  const kind = cell.getValue();
+  if (!kind) return "";
+  const label = CONFLICT_LABELS[kind] || "version conflict";
+  // The peer's filename is the useful part; fall back to its version, then to
+  // the bare label, so an older entry with no name recorded still says something.
+  const row = cell.getData();
+  const peer = row.conflict_name || row.conflict_version || "";
+  const title = peer ? label + ": " + peer : label;
+  const icon = kind === "higher" ? "version_stale.svg" : "version_conflict.svg";
+  return `<img src="/static/icons/${icon}" alt="${escape_html(label)}" title="${escape_html(title)}" class="cell-icon conflict-icon">`;
+}
+
+const CONFLICT_COLUMN = {
+  title: "!",
+  field: "conflict",
+  formatter: conflict_formatter,
+  headerTooltip: "an equal or higher version of this asset has already been approved",
+  hozAlign: "center",
+  headerHozAlign: "center",
+  width: 52,
+  minWidth: 52,
+  headerFilter: "list",
+  headerFilterParams: {
+    values: { higher: "higher exists", equal: "equal exists" },
+    clearable: true,
+  },
+  headerFilterPlaceholder: "all",
+};
+
 // QC predicates. Shared by the cell formatters (which colour a single cell) and
 // by row_qc_fails (which stamps the row for the "QC fails only" filter), so the
 // red text and the filter can never disagree about what counts as a failure.
@@ -485,6 +530,17 @@ function cell_context_menu(e, cell) {
   const value = filterable ? header_filter_value_for(cell) : null;
   const items = [];
 
+  // Rename is offered on the review table only — the browse tabs list assets
+  // that have already been approved or quarantined, and renaming one of those
+  // would diverge from the name recorded in the Google Sheet.
+  if (cell.getTable() === asset_table) {
+    items.push({
+      label: "Rename&hellip;",
+      action: () => open_rename_dialog(cell.getRow()),
+    });
+    items.push({ separator: true });
+  }
+
   if (value !== null) {
     items.push({
       label: `Filter by &ldquo;${escape_html(value)}&rdquo;`,
@@ -535,7 +591,10 @@ const TRACKED_COLUMN = {
 
 function asset_columns(options) {
   const trailing = (options && options.tracked) ? [TRACKED_COLUMN] : [];
-  return [
+  // Only the ingest table gets the conflict column — the browse tabs list what
+  // was already accepted, where the comparison has no one to answer to.
+  const leading = (options && options.conflicts) ? [CONFLICT_COLUMN] : [];
+  return leading.concat([
     { title: "Folder",        field: "parent",         formatter: folder_formatter,  maxInitialWidth: 260, ...TEXT_FILTER },
     { title: "Name",          field: "name",           formatter: name_formatter,    maxInitialWidth: 340, ...TEXT_FILTER },
     { title: "Screen / Stem", field: "screen",         sorter: screen_sorter,        maxInitialWidth: 180, ...LIST_FILTER },
@@ -551,7 +610,7 @@ function asset_columns(options) {
     { title: "Bits",          field: "audio_bits",     sorter: "number", ...number_filter() },
     { title: "Ch",            field: "audio_channels", sorter: "number", ...number_filter() },
     { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes"), ...number_filter("size_bytes", 1048576, "= > < MiB"), minWidth: 95 },
-  ].concat(trailing);
+  ]).concat(trailing);
 }
 
 // Flatten the scan result (keyed by fileid) into Tabulator's row array. Values
@@ -563,9 +622,17 @@ function asset_rows(assets_by_id) {
     parent: asset.parent || "",
     // display_name excludes screen/version/extension; older entries fall back
     name: asset.display_name || asset.basename || asset.name || "",
+    // The actual filename on disk. Not shown in any column — the rename dialog
+    // needs something to put in its box, and NAME is the trimmed display form.
+    filename: asset.name || "",
     screen: asset.screen || "",
     version: asset.version || "",
     is_version_up: !!asset.is_version_up,
+    // Flattened out of the version_conflict object so the column can sort and
+    // filter on the kind while the formatter still has the peer to name.
+    conflict: (asset.version_conflict && asset.version_conflict.kind) || "",
+    conflict_name: (asset.version_conflict && asset.version_conflict.name) || "",
+    conflict_version: (asset.version_conflict && asset.version_conflict.version) || "",
     extension: asset.extension || "",
     duration: asset.duration || "",
     duration_ms: asset.duration_ms,
@@ -647,7 +714,33 @@ function create_asset_table(element, options) {
 
   const table = new Tabulator(element, config);
   table.cn4m_options = options;  // reset_table_layout needs these back
+  track_empty_state(table);
   return table;
+}
+
+// Tabulator stretches its empty-state placeholder to the table's full height,
+// so a table with no rows (or a filter that matches none) leaves a tall void
+// with one line of text in it and pushes the action buttons below the fold.
+// Flag the element and let CSS collapse it — see `.tabulator.is-empty`.
+function track_empty_state(table) {
+  const mark = function() {
+    let empty;
+    try {
+      empty = table.getDataCount("active") === 0;
+    } catch (e) {
+      return;  // fires before the row manager is ready — the next event lands
+    }
+    if (empty === table.element.classList.contains("is-empty")) return;
+    table.element.classList.toggle("is-empty", empty);
+    // Tabulator measures the table against whatever height CSS allows, so a
+    // table that just gained rows would stay stuck at the collapsed height it
+    // was measured at. Re-measure once the class change has taken effect.
+    if (!empty) setTimeout(() => table.redraw(), 0);
+  };
+  table.on("tableBuilt", mark);
+  table.on("renderComplete", mark);
+  table.on("dataProcessed", mark);
+  table.on("dataFiltered", mark);
 }
 
 
@@ -742,6 +835,144 @@ function transcode_browse(name) {
 }
 
 
+// ── Rename dialog ─────────────────────────────────────────────────────────────
+// Right-click a row in the review table -> Rename. The file is renamed in place
+// in its own folder by the worker and re-scanned, so the row comes back with
+// freshly parsed version/basename fields and re-evaluated version conflicts.
+// Reachable from the review table only — see cell_context_menu.
+
+// fileid of the asset the open dialog is renaming; null when it's closed.
+let rename_fileid = null;
+
+function wire_rename_dialog() {
+  $('#rename-cancel').click(close_rename_dialog);
+  $('#rename-confirm').click(submit_rename);
+  // Clicking the backdrop closes; clicking the card itself must not.
+  $('#rename-modal').click(function(e) { if (e.target === this) close_rename_dialog(); });
+  $('#rename-input').keydown(function(e) {
+    if (e.key === "Enter") { e.preventDefault(); submit_rename(); }
+    if (e.key === "Escape") { e.preventDefault(); close_rename_dialog(); }
+  });
+}
+
+function open_rename_dialog(row) {
+  const data = row.getData();
+  rename_fileid = data.fileid;
+  $('#rename-folder').text(data.parent ? "in " + data.parent : "");
+  $('#rename-error').text("");
+  $('#rename-modal').show();
+  set_rename_busy(false);
+
+  const input = $('#rename-input').val(data.filename)[0];
+  input.focus();
+  // Select the stem and leave the extension out of the selection, the way a
+  // file manager does — the version number is what's being fixed, not the type.
+  const dot = data.filename.lastIndexOf(".");
+  input.setSelectionRange(0, dot > 0 ? dot : data.filename.length);
+}
+
+function close_rename_dialog() {
+  rename_fileid = null;
+  $('#rename-modal').hide();
+}
+
+// The rename round-trips through the worker, so the dialog stays open — and
+// inert — until the task reports back.
+function set_rename_busy(busy) {
+  $('#rename-confirm').prop('disabled', busy).text(busy ? "RENAMING…" : "RENAME");
+  $('#rename-cancel').prop('disabled', busy);
+  $('#rename-input').prop('disabled', busy);
+}
+
+function rename_dialog_error(message) {
+  set_rename_busy(false);
+  $('#rename-error').text(message);
+}
+
+function submit_rename() {
+  if (rename_fileid === null) return;
+  const new_name = $('#rename-input').val().trim();
+  if (!new_name) {
+    rename_dialog_error("Enter a filename.");
+    return;
+  }
+  $('#rename-error').text("");
+  set_rename_busy(true);
+  $.ajax({
+    type: 'POST',
+    url: '/rename_asset',
+    data: { fileid: rename_fileid, new_name: new_name },
+    success: function(data, status, request) {
+      poll_rename(request.getResponseHeader('Location'));
+    },
+    error: function(XMLHttpRequest, textStatus, errorThrown) {
+      rename_dialog_error(textStatus + ': ' + errorThrown);
+    },
+  });
+}
+
+// Deliberately not routed through update_progress: that machinery re-polls with
+// no delay, and there is no progress worth showing for a single rename anyway.
+function poll_rename(status_url) {
+  $.getJSON(status_url, function(data) {
+    if (data['state'] === 'PENDING' || data['state'] === 'PROGRESS') {
+      setTimeout(() => poll_rename(status_url), 200);
+      return;
+    }
+    if (data['state'] === 'FAILURE') {
+      rename_dialog_error("Rename failed: " + data['status']);
+      return;
+    }
+    const result = data['result'] || {};
+    // A refusal the worker declined on purpose (name taken, file gone, bad
+    // characters) — keep the dialog open so the name can be corrected.
+    if (result.error) {
+      rename_dialog_error(result.error);
+      return;
+    }
+    apply_rename_result(result);
+    close_rename_dialog();
+    $('#review_asset_progress').html(
+      "Renamed <b>" + escape_html(result.old_name) + "</b> to <b>" + escape_html(result.name) + "</b>");
+  }).fail(function() {
+    rename_dialog_error("Lost contact with the rename task — run the check again to see where it got to.");
+  });
+}
+
+// Fold a completed rename back into the table: the renamed row is replaced by
+// its re-scanned self, and every other visible row is refreshed from the same
+// payload, since fixing one version can clear a conflict flag on the row it
+// collided with. Rows the current view never had (assets left unreviewed by an
+// earlier scan) are deliberately not added — the review table shows the last
+// scan, and a rename shouldn't quietly widen that.
+function apply_rename_result(result) {
+  if (!asset_table) return;
+  const by_fileid = {};
+  for (const row of asset_rows(result.assets || {})) by_fileid[row.fileid] = row;
+
+  const was_selected = !!(asset_table.getRow(result.old_fileid)
+    && asset_table.getRow(result.old_fileid).isSelected());
+
+  const refreshed = asset_table.getData()
+    .map(row => by_fileid[row.fileid])
+    .filter(row => row !== undefined);
+
+  const sorters = asset_table.getSorters().map(s => ({ column: s.field, dir: s.dir }));
+
+  if (asset_table.getRow(result.old_fileid)) asset_table.deleteRow(result.old_fileid);
+  Promise.resolve(refreshed.length ? asset_table.updateData(refreshed) : null)
+    .then(() => by_fileid[result.fileid] ? asset_table.addData([by_fileid[result.fileid]]) : null)
+    .then(() => {
+      // addData appends, so re-apply the sort to drop the new row into place.
+      if (sorters.length) asset_table.setSort(sorters);
+      if (was_selected) asset_table.selectRow([result.fileid]);
+      update_qc_button();
+      update_selection_count();
+      update_flagged_select_button();
+    });
+}
+
+
 // ── Progressive disclosure of the ingest panes ────────────────────────────────
 // The review pane opens once a scan has produced a table; the track pane opens
 // once something has been approved or quarantined.
@@ -778,6 +1009,7 @@ function render_asset_table(assets_by_id) {
   asset_table = create_asset_table("#results", {
     data: rows,
     selectable: true,
+    conflicts: true,     // caution column for equal/higher versions already held
     persistence_id: PERSISTENCE_ID,
     placeholder: "No new assets found.",
   });

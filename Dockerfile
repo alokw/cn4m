@@ -14,7 +14,7 @@ RUN pip install --trusted-host pypi.python.org -r requirements.txt
 COPY . .
 
 # Expose Flask's port
-EXPOSE 5000
+EXPOSE 2640
 
 # Run Flask when the container starts
 CMD ["python", "run.py"]

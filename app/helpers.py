@@ -315,7 +315,16 @@ def build_google_row(asset):
         row.append(prefix + version)
     else:
         row.append("")
-    row.append(_file_type_emoji(ext).strip())                                # NOTES — file type emoji (🎵 🖼️ 🎬)
+    # NOTES — file type emoji (🎵 🖼️ 🎬) plus where the file came from: the name
+    # it was renamed out of in the review pane (rename_asset), and the source it
+    # was transcoded from (record_transcode_output). Both can apply to one
+    # asset — a transcode output that was then renamed.
+    provenance = []
+    if asset.get("created_from"):
+        provenance.append(f"created from {asset['created_from']}")
+    if asset.get("renamed_from"):
+        provenance.append(f"renamed from {asset['renamed_from']}")
+    row.append(" ".join(part for part in [_file_type_emoji(ext).strip(), "; ".join(provenance)] if part))
     row.append(asset["duration"]) if "duration" in asset else row.append("")
     row.append(ext)
     row.append(asset["video_codec"]) if "video_codec" in asset else row.append("")
@@ -535,7 +544,7 @@ def get_json_file(file):
     # Ensure all asset buckets exist (safe to call on a fresh or partial file)
     for key in ["tracked_flags", "tracked_repo_assets", "tracked_quar_assets",
                 "untracked_flags", "untracked_repo_assets", "untracked_quar_assets",
-                "unreviewed_assets", "unreviewed_flags"]:
+                "unreviewed_assets", "unreviewed_flags", "pending_transcodes"]:
         if key not in json_data:
             json_data[key] = {}
 
@@ -574,6 +583,86 @@ def asset_source_path(asset_data, bucket):
     if bucket in QUARANTINE_BUCKETS:
         return os.path.join(cn4m_quarantine, filename)
     return os.path.join(asset_data["folder"], filename)
+
+
+# ── Provenance notes ──────────────────────────────────────────────────────────
+# Notes recording where an asset came from, rather than anything derivable from
+# the file itself. check_asset builds an entry from the file alone, so any code
+# that re-scans a file we already know about has to carry these across by hand
+# or they are silently dropped — which matters because a re-scan re-reads every
+# unreviewed asset, not just newly arrived ones.
+
+PROVENANCE_KEYS = ("created_from", "renamed_from")
+
+
+def carry_provenance(new_asset, previous_asset, keys=PROVENANCE_KEYS):
+    """
+    Copy provenance notes from an asset's previous entry onto its freshly
+    scanned one. Never overwrites a note the caller has already set, so a
+    rename can decide its own renamed_from before calling this.
+    """
+    if not previous_asset:
+        return new_asset
+    for key in keys:
+        if previous_asset.get(key) and not new_asset.get(key):
+            new_asset[key] = previous_asset[key]
+    return new_asset
+
+
+# ── Transcode provenance ──────────────────────────────────────────────────────
+# A transcode output isn't an asset yet — it only becomes one when the next scan
+# finds the file. So the "created from" note can't be written onto an asset at
+# transcode time; it's parked in the "pending_transcodes" bucket and handed over
+# when the scan discovers the file it belongs to.
+
+def record_transcode_output(assets, out_path, source_name, preset_name=None):
+    """
+    Remember that out_path was just produced from source_name, keyed by the
+    fileid the next scan will compute for that file — so claiming it later is a
+    dict lookup rather than a search.
+
+    Only outputs inside the repo are recorded. run_ffmpeg_preset writes its
+    output beside the source, so transcoding a quarantined asset lands the
+    output in the quarantine folder, which get_files_from_folder never walks: a
+    record for one would sit here forever waiting for a scan that can't find it.
+    """
+    folder = os.path.normpath(os.path.dirname(out_path))
+    repo_root = os.path.normpath(cn4m_repo)
+    if folder != repo_root and not folder.startswith(repo_root + os.sep):
+        return
+
+    filename = os.path.basename(out_path)
+    assets.setdefault("pending_transcodes", {})[fast_hash(folder + "|" + filename)] = {
+        "created_from": source_name,
+        "preset": preset_name or "",
+        "path": out_path,
+        "recorded": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    }
+
+
+def claim_transcode_notes(assets, new_assets):
+    """
+    Hand each pending transcode record to the asset the scan just discovered for
+    it, as asset["created_from"], and clear the record.
+
+    Also drops records whose output has since vanished, so a transcode whose
+    file is deleted or moved before it's ever scanned doesn't sit in the bucket
+    forever. Anything still on disk is left alone — it's simply waiting for the
+    scan that will find it.
+    """
+    pending = assets.get("pending_transcodes") or {}
+    if not pending:
+        return
+
+    for fileid, asset in new_assets.items():
+        record = pending.pop(fileid, None)
+        if record and record.get("created_from"):
+            asset["created_from"] = record["created_from"]
+
+    for fileid in [f for f, record in pending.items() if not os.path.isfile(record.get("path") or "")]:
+        del pending[fileid]
+
+    assets["pending_transcodes"] = pending
 
 
 def write_json_file(json_data, json_filename):
@@ -815,6 +904,138 @@ def version_sort_key(version):
     return (0, int(m.group("num")), m.group("rest").casefold())
 
 
+def find_version_conflict(version, peers):
+    """
+    Compare an incoming asset's version against its peers — the assets already
+    approved or quarantined under the same basename.
+
+    A version-up is the normal case and isn't a conflict. What this catches is a
+    delivery that is *not* newer than what we already hold: the same version
+    arriving again (often as a different format, e.g. we have 1000_test_v2.png
+    and 1000_test_v2.mov turns up), or an older one arriving after a newer one.
+
+    Peers never include assets still awaiting review — see apply_version_flags.
+
+    peers is an iterable of (version, name) pairs. Returns the most serious
+    conflict as {"kind": "higher"|"equal", "version": ..., "name": ...}, or None
+    when this delivery really is the newest thing under its basename.
+
+    "higher" outranks "equal" and reports the highest peer found, since a stale
+    delivery is the worse of the two.
+
+    Only the version *number* orders anything. Two versions that share a number
+    but carry different suffixes ('v02_nlc' vs 'v02_hap') are separate variants,
+    not a conflict — and neither is higher than the other, whatever the suffixes
+    do alphabetically. Versions that don't parse as a number (see
+    version_sort_key) are likewise compared for equality only: there's no sane
+    ordering between 'v_final' and 'v03'.
+    """
+    mine = version_sort_key(version)
+    numbered = mine[0] == 0
+
+    equal = None
+    highest = None
+    highest_key = None
+    for peer_version, peer_name in peers:
+        key = version_sort_key(peer_version)
+        if key == mine:
+            # Ties broken by name so a rescan reports the same peer every time.
+            if equal is None or (peer_name or "").casefold() < (equal[1] or "").casefold():
+                equal = (peer_version, peer_name)
+        elif numbered and key[0] == 0 and key[1] > mine[1]:
+            if highest_key is None or key > highest_key:
+                highest, highest_key = (peer_version, peer_name), key
+
+    if highest:
+        return {"kind": "higher", "version": highest[0], "name": highest[1]}
+    if equal:
+        return {"kind": "equal", "version": equal[0], "name": equal[1]}
+    return None
+
+
+def apply_version_flags(assets_to_flag, existing_buckets):
+    """
+    Stamp is_version_up and version_conflict onto every asset in assets_to_flag
+    (a {fileid: asset} dict).
+
+    Both flags are measured against existing_buckets (an iterable of
+    {fileid: asset} dicts), but they answer different questions and treat the
+    rest of assets_to_flag differently:
+
+    is_version_up — "have we seen this basename before?" It says nothing about
+    which version is newer, and it does count the other assets in
+    assets_to_flag, so a batch containing v02 and v03 marks v03 as a version-up.
+
+    version_conflict — "is something we already hold at the same version or a
+    higher one?" (see find_version_conflict). Assets in assets_to_flag are
+    deliberately NOT peers here: two versions delivered in the same dump are
+    alternates awaiting a decision, and flagging them against each other is
+    noise, not information.
+
+    Basenames are matched case-insensitively, so "100_TeSt_A" and "100_test_a"
+    are the same asset. Existing entries are read from "basename" or, for
+    assets.json files written before that field existed, "asset_basename".
+    """
+    def entry_basename(entry):
+        return entry.get("basename") or entry.get("asset_basename")
+
+    existing_basenames = set()
+    for bucket in existing_buckets:
+        for existing in bucket.values():
+            # The move tasks pop with a None default, so a bucket can hold a None
+            # where an asset went missing mid-operation.
+            if not existing:
+                continue
+            bn = entry_basename(existing)
+            if bn:
+                existing_basenames.add(bn.casefold())
+
+    peers_by_basename = {}  # basename -> [(version, name, fileid)]
+    for bucket in existing_buckets:
+        for fileid, existing in bucket.items():
+            if not existing:
+                continue
+            bn = entry_basename(existing)
+            if bn and existing.get("version"):
+                peers_by_basename.setdefault(bn.casefold(), []).append(
+                    (existing["version"], existing.get("name") or "", fileid))
+
+    for asset in assets_to_flag.values():
+        bn = asset.get("basename")
+        asset["is_version_up"] = bool(bn) and bn.casefold() in existing_basenames
+
+    # existing_basenames only knows what's already been reviewed, so a basename
+    # arriving more than once within this same set (e.g. v02 and v03 both landing
+    # before anyone reviews them) wouldn't be caught above. Group by basename and
+    # mark all but the lowest version as version-ups too.
+    # Assets with no parsed version sit this out: their basename is just the
+    # filename stem, so two unrelated non-conforming files could collide.
+    groups = {}
+    for asset in assets_to_flag.values():
+        bn = asset.get("basename")
+        if bn and asset.get("version"):
+            groups.setdefault(bn.casefold(), []).append(asset)
+
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda a: version_sort_key(a.get("version", "")))
+        for asset in group[1:]:  # lowest version stays 🆕; everything above it is a version-up
+            asset["is_version_up"] = True
+
+    for fileid, asset in assets_to_flag.items():
+        bn = asset.get("basename")
+        version = asset.get("version")
+        if not bn or not version:
+            asset["version_conflict"] = None
+            continue
+        # Skip self. assets_to_flag shouldn't overlap existing_buckets at all,
+        # but a fileid landing in two buckets at once is a failure mode this
+        # codebase has hit before — cheap to be sure it can't self-flag.
+        others = [(v, n) for v, n, other in peers_by_basename.get(bn.casefold(), []) if other != fileid]
+        asset["version_conflict"] = find_version_conflict(version, others)
+
+
 # ── Hashing ───────────────────────────────────────────────────────────────────
 
 def fast_hash(input_string, length=32):
@@ -844,6 +1065,40 @@ def is_excluded(filename):
     return any(fnmatch.fnmatchcase(fname, pattern.lower()) for pattern in exclude_files)
 
 
+# Characters no SMB/Windows share accepts in a filename. The repo lives on a
+# NAS, so a name that only works on the Linux side of the mount would break the
+# next time anyone touched the file from Windows.
+INVALID_FILENAME_CHARS = '<>:"/\\|?*'
+
+
+def validate_asset_filename(name):
+    """
+    Check a user-supplied filename (from the review pane's rename box) for
+    anything that would make it unusable in the repo. Returns a message to show
+    the user, or None if the name is fine.
+
+    Expects surrounding whitespace to already be stripped. Deliberately does not
+    require the name to match the asset naming convention — a rename that lands
+    on a non-conforming name is the user's call, and the table shows it as
+    unparsed either way.
+    """
+    if not name:
+        return "Enter a filename."
+    if name in (".", ".."):
+        return "That isn't a filename."
+    if any(char in name for char in INVALID_FILENAME_CHARS):
+        return 'A filename cannot contain any of  <  >  :  "  /  \\  |  ?  *'
+    if any(ord(char) < 32 for char in name):
+        return "A filename cannot contain control characters."
+    if name.endswith((" ", ".")):
+        return "A filename cannot end with a space or a full stop."
+    if len(name) > 255:
+        return "That filename is too long — 255 characters at most."
+    if is_excluded(name):
+        return "That name is on the exclude list, so the file would be skipped on the next check."
+    return None
+
+
 def is_folder_excluded(folder_name):
     """
     Return True if a subdirectory name matches any pattern in EXCLUDE_FOLDERS.
@@ -871,4 +1126,4 @@ def purge_exclude_files(assets):
 
 __all__ = ["ASSETS_JSON", "LEGACY_ASSETS_JSON", "ASSET_BUCKETS", "QUARANTINE_BUCKETS",
            "find_asset", "asset_source_path",
-           "get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "version_sort_key", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps", "qc_resolution_rules", "qc_resolution_fails"]
+           "get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "carry_provenance", "record_transcode_output", "claim_transcode_notes", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "validate_asset_filename", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "version_sort_key", "find_version_conflict", "apply_version_flags", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps", "qc_resolution_rules", "qc_resolution_fails"]

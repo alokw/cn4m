@@ -17,6 +17,10 @@
 - [ ] **Pin dependency versions in `requirements.txt`** — currently unpinned; add loose bounds (e.g. `celery>=5,<6`, `Flask>=3,<4`) so public users get reproducible builds.
 - [ ] **Per-preset output validation for transcodes** — `quarantine_and_transcode` currently treats a transcode as successful if ffmpeg exits without error and leaves a non-empty output file. That won't catch a run that exits 0 but produces the wrong thing (e.g. the old source-resolution HAP, or an output missing a video/audio stream). Add optional per-preset expectations to `config/ffmpeg_config.yaml` (e.g. expected resolution / that a video stream exists) and ffprobe the output against them in `run_ffmpeg_preset` before counting it as complete. Would make the "don't quarantine until transcode is actually complete" guarantee much stronger.
 
+- [ ] **Integrate renaming with cn4m-symmetry** — the review pane's right-click **Rename…** renames only the file in the cn4m repo (`rename_asset` in `app/tasks.py`: `os.rename` within the asset's own folder, then a re-scan). Where the repo file is a symlink placed by cn4m-symmetry, the source keeps its original name and the two diverge from that point on — which is fine for a one-off version fix, but wrong if the original name matters downstream. Worth making the rename comprehensive: rename the source, then the link, so both stay in step.
+
+  Open questions: whether cn4m should reach into symmetry's tree directly or ask symmetry to do it (the worker would need write access either way); what to do when a rename half-succeeds; and whether the UI should say up front that a row is symlinked, so the choice isn't hidden behind a caveat in the README. Until then, the Renaming section of the README documents the limitation.
+
 ## Before open-sourcing
 
 - [ ] Rotate the Google service-account key and Discord webhook (old values are in git history)

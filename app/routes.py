@@ -121,6 +121,16 @@ def run_track_assets():
     task = track_assets.delay()
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
+@main.route('/rename_asset', methods=['POST'])
+def run_rename_asset():
+    """
+    Rename a single unreviewed asset in place and re-scan it. Goes through the
+    worker like every other mutation — the web container's workspace mount is
+    read-only.
+    """
+    task = rename_asset.delay(request.form.get('fileid'), request.form.get('new_name'))
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
 @main.route('/clear_flags', methods=['POST'])
 def run_clear_flags():
     """Archive the current unreviewed flags so the panel resets for the next scan."""

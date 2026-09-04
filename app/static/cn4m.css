@@ -110,6 +110,52 @@ body {
 .severity-warn {
   color: yellow;
 }
+
+
+/* ── Rename dialog ────────────────────────────────────────────────────────────
+   Hand-rolled rather than a Bootstrap modal: the vendored Bootstrap CSS styles
+   modals for a light page, and re-theming it costs more than the 30 lines here. */
+
+.obx-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 1050;
+	background-color: rgba(0, 0, 0, 0.6);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1rem;
+}
+
+.obx-modal-card {
+	background-color: #222222;
+	border: 1px solid #606060;
+	border-radius: 0.5rem;
+	padding: 1.25rem;
+	width: 100%;
+	max-width: 560px;
+	box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.obx-modal-error {
+	color: #ff6b6b;
+	min-height: 1.2em;  /* reserve the line so the buttons don't jump on an error */
+}
+
+.obx-input {
+	background-color: #3a3a3a;
+	border: 1px solid #606060;
+	border-radius: 6px;
+	color: #dfdfdf;
+	padding: 6px 10px;
+	width: 100%;
+	font-size: 0.9em;
+	outline: none;
+}
+
+.obx-input:focus {
+	border: 1px solid #F99D38;
+}
 /* ── Ingest sections ─────────────────────────────────────────────────────────
    CHECK / REVIEW / TRACK share one pane, revealed as the workflow progresses.
    The rule keys off the *general* sibling combinator rather than the adjacent
@@ -378,6 +424,23 @@ body {
 	color: #777;
 	font-size: 0.8rem;
 	font-weight: 300;
+	padding: 1.25rem 10px;
+}
+
+/* With no rows, Tabulator sizes the tableholder to the table's full height and
+   stretches the placeholder over it (min-height:100%), so "No new assets
+   found." floats in a screen-tall void and the action buttons fall below the
+   fold. track_empty_state() tags the element; collapse it to the text. The
+   inline heights Tabulator writes on the tableholder need !important to beat. */
+.tabulator.is-empty .tabulator-tableholder {
+	height: auto !important;
+	min-height: 0 !important;
+	max-height: 25vh !important;
+}
+
+.tabulator.is-empty .tabulator-tableholder .tabulator-placeholder,
+.tabulator.is-empty .tabulator-tableholder .tabulator-placeholder[tabulator-render-mode="virtual"] {
+	min-height: 0;
 }
 
 /* Scrollbar — dark, so a long scan doesn't put a bright bar down the side */
@@ -419,4 +482,11 @@ body {
 	vertical-align: middle;
 	opacity: 0.85;
 	margin-right: 6px;
+}
+
+/* Version conflict caution — sits alone in its column, so no text to space off */
+.conflict-icon {
+	height: 1.05em;
+	margin-right: 0;
+	opacity: 1;
 }

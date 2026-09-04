@@ -28,21 +28,45 @@
    ```
    docker compose up -d
    ```
-5. Open **http://localhost:5000**, drop some media files into your workspace's `repo\` folder, and click **START**.
+5. Open **http://localhost:2640**, drop some media files into your workspace's `repo\` folder, and click **START**.
 
-To stop: `docker compose down`. A Celery task dashboard (Flower) is also available at http://localhost:5555.
+To stop: `docker compose down`. A Celery task dashboard (Flower) is also available at http://localhost:2641. Both ports come from the suite-wide allocation — see [The cn4m suite](#the-cn4m-suite).
 
 ---
 
 ## What it does
 
 1. **Scan** — Walks a watched folder (your media delivery drop) and extracts metadata from every new file: codec, resolution, framerate, duration, audio format, sample rate, bit depth, file size, and timestamps.
-2. **Review** — Displays all new assets in a sortable, filterable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec, resolution, or framerate) are highlighted red, and a single button narrows the table to just the flagged assets. See [Reviewing assets](#reviewing-assets).
+2. **Review** — Displays all new assets in a sortable, filterable table so you can quickly assess whether they conform to spec. Cells that fail QC (wrong codec, resolution, or framerate) are highlighted red, and a single button narrows the table to just the flagged assets. A delivery that arrives at a version you have already approved gets a caution icon, and anything misnamed can be renamed in place from the table. See [Reviewing assets](#reviewing-assets).
 3. **Approve or Quarantine** — Approved files stay in place and are ready to track. Quarantined files are physically moved to a separate folder for manual review.
 4. **Track** — Pushes approved assets to a Google Sheet (one row per asset) for production tracking, with a status dropdown: `received → ingested → programmed → waiting → problem`. QC failures are highlighted red in the sheet too.
 5. **Transcode** — Runs selected assets through configurable ffmpeg presets (HAP, H.264 proxies, WAV extraction, audio-to-HAP wrapping for disguise/d3 media servers), optionally quarantining the originals afterward. Available on new assets and on anything already approved or quarantined.
 
 Optionally, cn4m posts a summary to a Discord channel whenever files are approved, quarantined, or pushed to the sheet.
+
+---
+
+## The cn4m suite
+
+cn4m is one of several tools sharing the same workflow and naming. The others live in their own repos and none of them are needed to run this one — they're listed here so the port allocation lives in one place.
+
+The suite reserves the **264x** range so every tool can run side by side on one machine without colliding:
+
+| Port | Service | In this repo |
+|---|---|---|
+| **2640** | cn4m web GUI (Flask) | ✔ |
+| **2641** | cn4m task monitor (Flower) | ✔ |
+| **2642** | cn4m message broker (Redis) | ✔ |
+| 2645 | cn4m-inbound | |
+| 2646 | cn4m-smartsync | |
+| 2647 | cn4m-symmetry | |
+| 2649 | cn4m-cascade | |
+
+Only the first three are configured here, in [docker-compose.yaml](docker-compose.yaml). 2640 is ours end to end — it's the port Flask itself listens on. 2641 and 2642 are host-side mappings onto the stock ports inside the Flower and Redis images (5555 and 6379), which are left alone: the containers talk to each other over the Docker network, so `CELERY_BROKER_URL=redis://redis:6379/0` names the *container* port and is deliberately unchanged.
+
+Publishing 2642 at all is only so you can inspect Redis from the host — the worker reaches it over the Docker network either way, and you can drop that mapping without affecting anything.
+
+**Upgrading from an earlier version?** The web GUI moved from 5000 to 2640 and Flower from 5555 to 2641, so `docker compose up -d` is required to republish the ports (a plain `restart` keeps the old mapping). Update any bookmarks.
 
 ---
 
@@ -130,11 +154,15 @@ QC_FPS='29.97, 30'
 
 cn4m parses structured fields out of filenames following the convention `{id}_{desc}_{screen}_{version}.{ext}`, e.g. `1000_prestige_segment_ab_v01.mov` → id `1000`, description `prestige_segment`, screen `ab`, version `v01`. The screen field is what `SCREEN@WxH` resolution rules match against, and the version field powers version-up detection (a new file whose base name — id, description **and** screen, everything but the version — matches an already-tracked asset is marked as a version-up ☝️ rather than a new asset 🆕, so the same content delivered for two different screens counts as two new assets rather than a version of one; when several versions of the same base name turn up in a single scan, the lowest is the new asset and the rest are version-ups). The NAME column shows just the id and description; the screen lives in its own SCREEN column. Files that don't match the convention are still processed — they just won't have screen/version metadata, so only the screen-less `WxH` resolution rules apply to them.
 
+The version field also drives the caution icon in the review table, which fires when a delivery is *not* newer than an asset you have already approved — see [Version conflicts](#version-conflicts).
+
 ### Transcode presets
 
 The **TRANSCODE** and **QUARANTINE & TRANSCODE** buttons run the selected assets through an ffmpeg preset chosen from the dropdown. Presets are defined in [config/ffmpeg_config.yaml](config/ffmpeg_config.yaml) — the file is heavily commented and ships with presets for HAP transcodes, H.264 review proxies, WAV audio extraction, and wrapping audio files in a tiny 16×16 HAP `.mov` (so disguise/d3 media servers can play them back as standard video assets). Adding your own preset is a copy-paste-edit of an existing block; no code changes needed.
 
 Preset options can reference `{field}` tokens (like `{framerate}`) that are filled in at runtime from [config/project_config.yaml](config/project_config.yaml) or from the asset's own metadata. Both YAML files are read fresh on every transcode, so edits take effect without a restart.
+
+An output lands next to its source and becomes an asset on your next check. When it does, cn4m stamps `created from <source filename>` on it, which shows up in the Google Sheet's NOTES column — so a transcode's origin is still legible months later. (Transcodes run from the QUARANTINED tab write into the quarantine folder, which isn't scanned, so those outputs never become assets.)
 
 ---
 
@@ -145,10 +173,14 @@ Once the app is open in your browser, you land on the **NEW** tab. Its three sec
 **1. Check Assets**
 Click **START** to scan the repo folder for new files. A progress bar shows each file being analyzed. When the scan completes, the **REVIEW ASSETS** pane opens with everything it found.
 
+Re-checking is safe at any point: assets you've already approved or quarantined are skipped, anything still awaiting review is re-read so its metadata refreshes, and assets whose file has since been deleted or moved out of the repo are dropped from the review list and reported below the table.
+
 **2. Review Assets**
 The table shows each file's folder, name, screen, version, duration, codec, resolution, framerate, audio specs, and size. Sort by any column, filter by any column, and tick the rows you want to act on — see [Reviewing assets](#reviewing-assets) for the full set of controls.
 
 - Codec, resolution, and framerate cells that fail your QC rules appear in red (hover for the expected value). **SHOW FLAGGED ONLY** narrows the table to just those files, and **SELECT ALL FLAGGED** selects them.
+- A caution icon in the leftmost **!** column marks a delivery that isn't newer than something already approved — hover it for the filename it collided with. See [Version conflicts](#version-conflicts).
+- Right-click a row and choose **Rename…** to fix a bad filename in place without leaving the browser. See [Renaming](#renaming).
 - Files that couldn't be parsed at all (invalid or corrupt) are listed below the table with a warning note.
 
 **3. Approve, Quarantine, or Transcode**
@@ -162,6 +194,8 @@ Approving or quarantining opens the **TRACK ASSETS** pane.
 
 **4. Track Assets**
 Click **UPDATE GOOGLE SHEET** to push all approved (not yet tracked) assets to the configured Google Sheet. Both repo and quarantine assets are pushed. Each asset gets a row with status set to `received`, and QC failures are highlighted red in the sheet.
+
+The NOTES column carries the file-type emoji plus where the file came from: `created from …` for a transcode output, `renamed from …` for a file renamed during review, or both.
 
 **Afterwards**
 The **APPROVED** and **QUARANTINED** tabs show everything already in each state, so you can look back over past deliveries, check what's still waiting to reach the sheet, or re-transcode something without scanning it in again. See [Tabs](#tabs).
@@ -182,7 +216,7 @@ Three tabs sit opposite the logo:
 
 The NEW tab reveals its panes as you go: **CHECK ASSETS** on its own at first, **REVIEW ASSETS** once a scan finishes, and **TRACK ASSETS** once you've approved or quarantined something. (If assets from an earlier session are still waiting to be pushed to the sheet, the track pane opens straight away, so you can always reach it.)
 
-APPROVED and QUARANTINED are the same table as the review view — same columns, sorting, filters, selection and clipboard copy — plus a **TRACKED** column at the end showing whether each asset has been pushed to the Google Sheet yet. Each also has its own preset dropdown and **TRANSCODE** button, so you can re-encode something that has already been approved or quarantined without scanning it in again. Approve and quarantine themselves stay on the NEW tab. They re-read `assets.json` each time you open them, so they always reflect what you just did on the NEW tab.
+APPROVED and QUARANTINED are the same table as the review view — same columns, sorting, filters, selection and clipboard copy — plus a **TRACKED** column at the end showing whether each asset has been pushed to the Google Sheet yet, and minus the version conflict column and the rename menu item, both of which only make sense while an asset is still awaiting review. Each also has its own preset dropdown and **TRANSCODE** button, so you can re-encode something that has already been approved or quarantined without scanning it in again. Approve and quarantine themselves stay on the NEW tab. They re-read `assets.json` each time you open them, so they always reflect what you just did on the NEW tab.
 
 Note that the FOLDER column on the QUARANTINED tab shows where an asset was *delivered*, not the quarantine folder it now lives in — the original path is kept so you can see where it came from. Transcoding resolves the real location, so a quarantined asset is read from (and its output written to) the quarantine folder.
 
@@ -190,7 +224,7 @@ Note that the FOLDER column on the QUARANTINED tab shows where an asset was *del
 
 ## Reviewing assets
 
-The review table is built on [Tabulator](https://tabulator.info/) 6.5.2, vendored in `app/static/` — no build step or package manager involved. The same table powers the APPROVED and QUARANTINED tabs, so everything below applies there too.
+The review table is built on [Tabulator](https://tabulator.info/) 6.5.2, vendored in `app/static/` — no build step or package manager involved. The same table powers the APPROVED and QUARANTINED tabs, so everything below applies there too, except [Version conflicts](#version-conflicts) and [Renaming](#renaming), which are NEW-tab only.
 
 ### Sorting
 
@@ -202,6 +236,7 @@ Every column has a filter box under its header.
 
 | Column type | Filter |
 |---|---|
+| **!** (version conflict) | dropdown: `higher exists` / `equal exists` |
 | Folder, Name | type any text — matches anywhere in the value, case-insensitive |
 | Screen, Version, Ext, Codec, Audio | dropdown of the values present in this scan |
 | Width, Height, FPS, Rate, Bits, Ch, Duration, Size | number, with comparison operators |
@@ -219,7 +254,7 @@ Numeric columns accept operators, so you can type:
 
 **Duration filters in seconds and Size filters in MiB** (the units are shown in each box), even though the columns display a timecode and a human-readable size. Files with no value for a column — an audio stem has no width — are excluded whenever that column is filtered.
 
-**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout.
+**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout. On the NEW tab the same menu offers **Rename…** — see [Renaming](#renaming).
 
 ### Flagged assets
 
@@ -229,6 +264,37 @@ Numeric columns accept operators, so you can type:
 - **SELECT ALL FLAGGED** — selects the flagged rows in place, ready for QUARANTINE or TRANSCODE.
 
 Both turn orange while active, and both disappear if no QC rules are configured in `.env`.
+
+### Version conflicts
+
+The narrow **!** column at the far left carries a caution icon when a delivery is *not* newer than an asset you have already approved:
+
+| Icon | Meaning |
+|---|---|
+| amber triangle | **equal version already approved** — an approved asset carries this exact version, usually the same cut in another format (you approved `1000_test_v2.png`, and now `1000_test_v2.mov` turns up) |
+| red triangle | **higher version already approved** — this delivery is behind what you hold (you approved `v008`, and now `v007` arrives) |
+
+Hover the icon for the filename it collided with. The column has its own dropdown filter (`higher exists` / `equal exists`) so you can isolate them, and right-click works as it does anywhere else in the table.
+
+**Only approved assets count as peers.** Two versions arriving in the same delivery are alternates that nobody has ruled on yet, so a dump containing `v007` and `v008` doesn't flag either of them. Quarantined assets aren't peers either — a redelivery at the same version is the expected fix after a rejection, not a problem.
+
+**Only the version number orders anything.** `v02_nlc` and `v02_hap` are separate variants of one version, not a conflict, and neither is higher than the other whatever the suffixes do alphabetically. Zero-padding and case are ignored, so `v02` and `V2` are the same version. A version that isn't a number (`v_final`) is only ever compared for equality.
+
+This is separate from QC flagging: a version conflict isn't a red cell, and SHOW FLAGGED ONLY won't narrow to it. It's a prompt to look, not a verdict — the delivery may well be a legitimate alternate.
+
+### Renaming
+
+Right-click a row on the **NEW** tab and choose **Rename…** to correct a filename in place — most useful when a delivery arrives at a repurposed or lower version number and you'd rather fix it than send it back. The box opens with the current filename and the stem selected, leaving the extension out of the selection the way a file manager does. Enter renames, Esc cancels.
+
+The file is renamed in its own folder and immediately re-scanned, so the row comes back with freshly parsed screen and version fields and its version conflict re-evaluated — including on the row it collided with, which may lose its caution icon as a result. Your selection, sort and filters survive.
+
+A rename is refused, with the reason shown in the box so you can correct it, if the name is empty, contains characters a Windows/SMB share won't accept (`< > : " / \ | ? *`), ends in a space or a full stop, matches one of your `EXCLUDE_FILES` patterns (the file would vanish on the next check), or collides with a file already in that folder. Nothing on disk is touched unless the rename goes through.
+
+The original filename is recorded on the asset as `renamed from <original>` and travels with it into the Google Sheet's NOTES column. Renaming twice keeps pointing at the name the file actually arrived under, and renaming back to that name clears the note.
+
+**Renaming is offered on the NEW tab only.** Once an asset is approved or quarantined its name is recorded in the Google Sheet, and renaming it here would quietly diverge from that.
+
+**If you use cn4m-symmetry:** a rename here only renames the file in the cn4m repo — the symlink source is left untouched, so the two names diverge from that point on. Rename at the source instead if the original name matters downstream.
 
 ### Selecting
 
@@ -261,7 +327,7 @@ cn4m runs as four Docker services:
 | `web` | Flask web server — serves the UI and handles HTTP requests |
 | `worker` | Celery worker — runs all the background tasks (scanning, moving files, transcoding, Google Sheets) |
 | `redis` | Message broker between Flask and Celery |
-| `flower` | Celery task monitoring dashboard (http://localhost:5555) |
+| `flower` | Celery task monitoring dashboard (http://localhost:2641) |
 
 **The frontend** is a single page with no build step: jQuery, Bootstrap and Tabulator 6.5.2 are vendored as plain files in `app/static/`. `cn4m.js` polls the task status endpoint and owns the asset tables — column definitions, QC formatting, filters and selection. All three tables (review, repo, quarantine) are built by one `create_asset_table()` factory, differing only in whether rows are selectable and whether the TRACKED column is shown.
 
@@ -276,6 +342,8 @@ unreviewed_assets  →  untracked_repo_assets  →  tracked_repo_assets
 ```
 
 Actions that can be started from more than one tab look an asset up across *all* of these buckets rather than assuming it's still unreviewed, and resolve its path accordingly — a quarantined asset's stored `folder` is where it was delivered, but the file itself now lives in the quarantine folder.
+
+One further top-level key, `pending_transcodes`, is not an asset bucket. A transcode output isn't an asset until the next scan finds it, so "created from `<source>`" is parked there — keyed by the ID that scan will compute for the file — and handed to the asset on discovery. Renaming an asset from the review pane records "renamed from `<original>`" on it directly. Both notes travel with the asset into the Google Sheet's NOTES column.
 
 **All actions are async**: each button click fires a POST request that starts a Celery task, and the browser polls a `/status/<task_id>` endpoint to update the progress display.
 

@@ -3,7 +3,8 @@ services:
     build: .
     container_name: flask_app
     ports:
-      - "5000:5000"  # Map Flask's port to the host
+      # Suite port allocation — see "The cn4m suite" in the README.
+      - "2640:2640"  # cn4m web GUI
     depends_on:
       - redis
       - worker
@@ -23,13 +24,15 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - RESULT_BACKEND=redis://redis:6379/0
       - TZ=${TZ}
-    command: ["flask", "run", "--host=0.0.0.0", "--port=5000", "--reload"]
+    command: ["flask", "run", "--host=0.0.0.0", "--port=2640", "--reload"]
 
   redis:
     image: redis/redis-stack-server:latest
     container_name: redis_server
     ports:
-      - "6379:6379"
+      # Host-side only, for inspecting Redis from outside the container. The
+      # other services reach it over the Docker network on 6379 regardless.
+      - "2642:6379"  # cn4m message broker
     environment:
       - TZ=${TZ}
     volumes:
@@ -72,7 +75,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - TZ=${TZ}
     ports:
-      - "5555:5555"
+      - "2641:5555"  # cn4m task monitor
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro

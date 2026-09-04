@@ -101,6 +101,21 @@
         </div>
     </div>
 
+    <!-- Rename dialog. Opened from the review table's right-click menu only —
+         see open_rename_dialog() in cn4m.js. -->
+    <div id="rename-modal" class="obx-modal" style="display:none;">
+        <div class="obx-modal-card">
+            <div class="pb-2 text-uppercase fw-semibold obx-orange">rename asset</div>
+            <div class="fw-lighter fs-7 pb-2" id="rename-folder"></div>
+            <input id="rename-input" class="obx-input" type="text" spellcheck="false" autocomplete="off" autocapitalize="off">
+            <div class="fs-7 pt-2 obx-modal-error" id="rename-error"></div>
+            <div class="d-flex justify-content-end pt-3">
+                <button id="rename-cancel" class="obx-button">CANCEL</button>
+                <button id="rename-confirm" class="obx-button" style="margin-left:0.5rem;">RENAME</button>
+            </div>
+        </div>
+    </div>
+
     <div id="tab-quarantine" class="tab-panel" style="display:none;">
         <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
             <div class="d-flex justify-content-between align-items-center pb-2">
@@ -133,6 +148,7 @@ $(function() { $('#select-flagged').click(select_all_flagged); });
 $(function() { $('.obx-tab').click(function() { show_tab($(this).data('tab')); }); });
 $(function() { $('#repo-transcode').click(function() { transcode_browse('repo'); }); });
 $(function() { $('#quarantine-transcode').click(function() { transcode_browse('quarantine'); }); });
+$(wire_rename_dialog);
 $(load_ffmpeg_presets);
 $(load_qc_config);
 $(reveal_track_pane_if_pending);
