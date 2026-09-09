@@ -151,11 +151,44 @@ body {
 .obx-app-status {
 	color: #7a7a7a;
 	display: flex;
-	align-items: center;
-	gap: 0.4rem;
+	justify-content: flex-end;
 	min-width: 0;        /* lets the text ellipsis rather than shove the links */
 	max-width: 55%;
 	padding-left: 1rem;
+	position: relative;  /* anchors the history tray below it */
+}
+
+/* The status line doubles as the toggle for the history tray, so it's a real
+   button — stripped back to inheriting the rail's type. */
+.obx-status-toggle {
+	background: none;
+	border: none;
+	margin: 0;
+	padding: 0;
+	font: inherit;
+	color: inherit;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	min-width: 0;
+	max-width: 100%;
+}
+
+.obx-status-toggle:hover {
+	color: #dfdfdf;
+}
+
+.obx-status-caret {
+	color: #5a5a5a;
+	flex: none;
+	font-size: 0.9em;
+	transition-duration: 0.3s;
+}
+
+.obx-status-toggle:hover .obx-status-caret,
+.obx-status-open .obx-status-caret {
+	color: #F99D38;
 }
 
 #app-status-text {
@@ -173,12 +206,104 @@ body {
 	flex: none;
 }
 
+/* Same green as the TRACKED tick, so "went fine" reads the same across the UI */
+.obx-status-ok {
+	background-color: #6ee7a8;
+}
+
 .obx-status-working {
 	background-color: #F99D38;
 }
 
+/* Finished, but not cleanly. Yellow sits between the working orange and the
+   ok green on purpose: it has to read as "not green" at a glance without
+   claiming the urgency of the red. */
+.obx-status-warning {
+	background-color: #ffd166;
+}
+
+/* Waiting on a person. Purple is the only hue here that isn't on the
+   green-to-red scale, because this one isn't a verdict on how the run went —
+   it's still running, and it wants someone. */
+.obx-status-blocked {
+	background-color: #a78bfa;
+}
+
 .obx-status-error {
 	background-color: #ff6b6b;
+}
+
+/* History tray — hangs off the status line, clear of the rail's bottom edge.
+   Below the rename dialog's z-index so a modal always wins. */
+.obx-status-history {
+	position: absolute;
+	top: calc(100% + 0.75rem);
+	right: 0;
+	z-index: 1000;
+	min-width: 250px;
+	max-width: 400px;
+	background-color: #222222;
+	border: 1px solid #3a3a3a;
+	border-radius: 6px;
+	padding: 0.35rem 0;
+	box-shadow: 0 10px 26px rgba(0, 0, 0, 0.5);
+}
+
+.obx-status-history-row {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	padding: 0.3rem 0.7rem;
+	color: #8a8a8a;
+	white-space: nowrap;
+	line-height: 1.4;    /* the rail sets 1, which clips descenders when stacked */
+}
+
+/* Newest entry brightest — it matches the line on show in the rail */
+.obx-status-history-row:first-child {
+	color: #dfdfdf;
+}
+
+/* Shared by the rail line and the history rows. Empty on the rail until the
+   first real event lands, so the placeholder "Ready" sits alone. */
+.obx-status-time {
+	color: #6a6a6a;
+	flex: none;
+	font-variant-numeric: tabular-nums;
+}
+
+.obx-status-time:empty {
+	display: none;
+}
+
+/* Which suite tool an entry came from. cn4m's own entries carry no label, so
+   the column is ragged by design — a label means "this happened elsewhere". */
+/* Which suite tool an entry came from, on the rail line and on every history
+   row. A tag rather than coloured text: at this size the border is what makes
+   it read as a label on the message rather than the first word of it. cn4m's
+   own entries carry none — you already know which app you're looking at, so a
+   tag means "this happened somewhere else". */
+.obx-status-app {
+	background-color: #33281a;
+	border: 1px solid #5a4527;
+	border-radius: 3px;
+	color: #F99D38;
+	flex: none;
+	font-size: 0.9em;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	line-height: 1.35;
+	padding: 0 4px;
+}
+
+.obx-status-entry {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.obx-status-history-empty {
+	padding: 0.3rem 0.7rem;
+	color: #6a6a6a;
 }
 
 

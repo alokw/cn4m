@@ -64,9 +64,68 @@ The suite reserves the **264x** range so every tool can run side by side on one 
 
 Only the first three are configured here, in [docker-compose.yaml](docker-compose.yaml). 2640 is ours end to end — it's the port Flask itself listens on. 2641 and 2642 are host-side mappings onto the stock ports inside the Flower and Redis images (5555 and 6379), which are left alone: the containers talk to each other over the Docker network, so `CELERY_BROKER_URL=redis://redis:6379/0` names the *container* port and is deliberately unchanged.
 
-A thin rail across the top of the cn4m UI links to the other tools, marking cn4m itself as the one you're in. The links are built from the port plus `window.location.hostname`, so opening cn4m on the NAS from a laptop gives you links to the tools **on the NAS** — the list lives in `SUITE_TOOLS` at the top of [app/static/cn4m.js](app/static/cn4m.js), and adding a tool is one line. The right of that rail carries an app-level status line (`set_app_status()`), kept separate from the per-pane progress text.
+A thin rail across the top of the cn4m UI links to the other tools, marking cn4m itself as the one you're in. The links are built from the port plus `window.location.hostname`, so opening cn4m on the NAS from a laptop gives you links to the tools **on the NAS** — the list lives in `SUITE_TOOLS` at the top of [app/static/cn4m.js](app/static/cn4m.js), and adding a tool is one line.
+
+The right of that rail is a status line, reporting what cn4m has just done (`Discovered 12 new assets`, `Approved 5 assets`, `12 assets pushed to the Google Sheet`) alongside anything the other tools have pushed to it. It is deliberately not a second home for task progress — each pane already has its own progress text. Click it for the last five entries with timestamps, the other tools' messages prefixed with their name; click anywhere else or press Esc to close. The history is per-session and lives only in the browser, so a reload starts it fresh rather than presenting yesterday's activity as though it had just happened.
 
 Publishing 2642 at all is only so you can inspect Redis from the host — the worker reaches it over the Docker network either way, and you can drop that mapping without affecting anything.
+
+### Suite status feed
+
+The status line in cn4m's rail isn't only cn4m's. The other tools can push short updates to it, so a glance at the top of the page tells you what the whole suite has been doing:
+
+```
+curl -X POST http://<cn4m-host>:2640/suite/status \
+     -H "Content-Type: application/json" \
+     -d '{"app": "symmetry", "message": "Synced 40 links", "level": "idle"}'
+```
+
+Form encoding works too, if that's easier from a shell script:
+
+```
+curl -X POST http://<cn4m-host>:2640/suite/status \
+     -d app=inbound -d message="Received 12 files" -d level=working
+```
+
+| Field | | |
+|---|---|---|
+| `app` | required | Which tool it came from. Shown as an orange prefix, so keep it to the tool's name. |
+| `message` | required | One short line. Whitespace is collapsed; anything past 160 characters is trimmed with an ellipsis rather than rejected. |
+| `level` | optional | `idle` (default), `ok`, `working`, `warning`, `blocked` or `error` — colours the status dot. Matched case-insensitively; an unrecognised value falls back to `idle` rather than failing the request, so a message is never lost to a bad level. |
+
+#### Levels
+
+| Level | Dot | Means |
+|---|---|---|
+| `idle` | grey | Nothing happening. The resting state, and what an unrecognised level becomes. |
+| `working` | orange | In progress right now. |
+| `ok` | green | Finished, nothing to do. |
+| `warning` | yellow | Finished, but not cleanly. Nothing is broken and nobody must act now, but it shouldn't read as green — a run that completed partially, say one destination skipped because a NAS was off. |
+| `blocked` | purple | Not finished: waiting on a person, with a timeout running. Actionable now, unlike `warning` — a destination is unreachable and the run is awaiting a decision. |
+| `error` | red | Finished badly, or couldn't run at all. |
+
+The distinction that matters most is `warning` against `blocked`. A `warning` is
+historical — the run is over and this is the record of how it went. A `blocked`
+is live: it's still on the clock, someone needs to act, and it will resolve into
+something else on its own when they do or when the timeout expires.
+
+A success and a failure are the same call with a different level — green and red respectively:
+
+```
+curl -X POST http://<cn4m-host>:2640/suite/status \
+     -d app=cascade -d message="Published 40 links" -d level=ok
+
+curl -X POST http://<cn4m-host>:2640/suite/status \
+     -d app=cascade -d message="Publish failed: 3 of 40 links unresolved" -d level=error
+```
+
+Returns `201` with the stored entry, `400` if `app` or `message` is missing, `403` if a token is required and wrong, `503` if Redis is unreachable.
+
+`GET /suite/status` returns the feed, newest first, as `{"entries": [...], "latest_id": N}`. Pass `?since=<id>` for only what has arrived since — that's how the UI polls (every 10 seconds), so a message is never shown twice and a slow poll just catches up.
+
+The feed lives in Redis, capped at the last 20 entries: it survives a page reload and a Flask restart, and every open browser sees the same thing. It is **activity, not a log** — nothing here is archived, and anything worth keeping belongs in the Google Sheet.
+
+**Security.** The endpoint is open by default, like the rest of cn4m, which assumes a trusted LAN. Setting `SUITE_STATUS_TOKEN` in `.env` requires callers to send it as an `X-CN4M-Token` header (or a `token` field) — worth doing the moment anything outside that LAN can reach port 2640, since this endpoint writes text that everyone's UI displays.
 
 **Upgrading from an earlier version?** The web GUI moved from 5000 to 2640 and Flower from 5555 to 2641, so `docker compose up -d` is required to republish the ports (a plain `restart` keeps the old mapping). Update any bookmarks.
 
@@ -89,6 +148,7 @@ All settings live in the `.env` file in the project root (copy `.env.example` to
 | `QC_RESOLUTION` | | Resolution rules, comma-separated. `SCREEN@WxH` applies to files on that screen; a bare `WxH` applies to every file, including files with no screen field (e.g. `A1@112x336, 1920x1080`). A file passes if it matches any applicable rule. Omit to skip resolution QC. |
 | `QC_FPS` | | Comma-separated allowed framerates (e.g. `29.97, 30`). Omit to skip framerate QC. |
 | `TIME_BETWEEN_CHECKS` | | Delay (seconds) between processing each file — keeps progress updates responsive in the UI. Default: `0.001` |
+| `SUITE_STATUS_TOKEN` | | Shared secret for the suite status feed (`POST /suite/status`). Unset means the endpoint is open — see [Suite status feed](#suite-status-feed). |
 | `SECRET_KEY` | | Random string for Flask session security. Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 
 `CELERY_BROKER_URL` and `RESULT_BACKEND` are set automatically by docker-compose and don't need to be configured.
@@ -218,7 +278,7 @@ Three tabs sit opposite the logo:
 
 The NEW tab reveals its panes as you go: **CHECK ASSETS** on its own at first, **REVIEW ASSETS** once a scan finishes, and **TRACK ASSETS** once you've approved or quarantined something. (If assets from an earlier session are still waiting to be pushed to the sheet, the track pane opens straight away, so you can always reach it.)
 
-APPROVED and QUARANTINED are the same table as the review view — same columns, sorting, filters, selection and clipboard copy — plus a **TRACKED** column at the end showing whether each asset has been pushed to the Google Sheet yet, and minus the version conflict column and the rename menu item, both of which only make sense while an asset is still awaiting review. Each also has its own preset dropdown and **TRANSCODE** button, so you can re-encode something that has already been approved or quarantined without scanning it in again. Approve and quarantine themselves stay on the NEW tab. They re-read `assets.json` each time you open them, so they always reflect what you just did on the NEW tab.
+APPROVED and QUARANTINED are the same table as the review view — same sorting, filters, selection and clipboard copy — with three columns the review table doesn't have, and minus the version conflict column and the rename menu item, both of which only make sense while an asset is still awaiting review. The extra columns are **FILENAME** (the full name on disk, version and extension included, sitting next to NAME which shows only the id and description), **PROCESSED** (when the scan first saw the file) and **TRACKED** (whether it has reached the Google Sheet). Each also has its own preset dropdown and **TRANSCODE** button, so you can re-encode something that has already been approved or quarantined without scanning it in again. Approve and quarantine themselves stay on the NEW tab. They re-read `assets.json` each time you open them, so they always reflect what you just did on the NEW tab.
 
 Note that the FOLDER column on the QUARANTINED tab shows where an asset was *delivered*, not the quarantine folder it now lives in — the original path is kept so you can see where it came from. Transcoding resolves the real location, so a quarantined asset is read from (and its output written to) the quarantine folder.
 
@@ -232,6 +292,8 @@ The review table is built on [Tabulator](https://tabulator.info/) 6.5.2, vendore
 
 Click any column header to sort, click again to reverse. Duration and Size sort by real magnitude rather than by their displayed text, and Screen / Stem groups audio files together ahead of everything else.
 
+**APPROVED and QUARANTINED open newest first** — most recently processed at the top, since those tabs are for looking back and the last delivery is usually the one in question. Assets scanned before cn4m recorded a processed date sink to the bottom rather than claiming to be the oldest or newest. Clicking any header replaces that ordering with your own, and because sorts are remembered per table, a sort chosen earlier wins on the next visit; right-click and **Reset column layout** to get the default order back.
+
 ### Filtering
 
 Every column has a filter box under its header.
@@ -241,6 +303,7 @@ Every column has a filter box under its header.
 | **!** (version conflict) | dropdown: `higher exists` / `equal exists` |
 | Folder, Name | type any text — matches anywhere in the value, case-insensitive |
 | Screen, Version, Ext, Codec, Audio | dropdown of the values present in this scan |
+| Filename, Processed *(browse tabs)* | type any text — for Processed, a date like `2026-09-06` narrows to that day |
 | Width, Height, FPS, Rate, Bits, Ch, Duration, Size | number, with comparison operators |
 
 Numeric columns accept operators, so you can type:

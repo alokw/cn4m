@@ -8,6 +8,8 @@ from app.tasks import *
 from app import celery
 from app.helpers import (get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions,
                          parse_qc_fps, get_json_file, ASSETS_JSON)
+from app.suite_status import push_status, read_status
+import os
 
 main = Blueprint("main", __name__)
 
@@ -136,6 +138,68 @@ def run_clear_flags():
     """Archive the current unreviewed flags so the panel resets for the next scan."""
     task = clear_flags.delay()
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
+
+# ── Suite status feed ─────────────────────────────────────────────────────────
+# The other cn4m suite tools POST short status lines here and they surface in
+# the rail at the top of the UI. Documented under "Suite status feed" in the
+# README — that's the contract those tools are written against, so think twice
+# before changing the shape of what's accepted or returned.
+
+def _suite_token_ok():
+    """
+    SUITE_STATUS_TOKEN in .env turns on a shared secret for pushes. Left unset
+    the endpoint is open, matching the rest of cn4m, which assumes a trusted
+    LAN. It's worth setting once anything outside that LAN can reach the port.
+    """
+    expected = (os.getenv("SUITE_STATUS_TOKEN") or "").strip()
+    if not expected:
+        return True
+    supplied = (request.headers.get("X-CN4M-Token")
+                or (request.get_json(silent=True) or {}).get("token")
+                or request.form.get("token") or "").strip()
+    return supplied == expected
+
+
+@main.route('/suite/status', methods=['GET'])
+def get_suite_status():
+    """
+    The feed, newest first. Pass ?since=<id> to get only what's arrived since —
+    the UI polls this way so a message is never shown twice.
+    """
+    try:
+        since = int(request.args.get('since', 0))
+    except (TypeError, ValueError):
+        since = 0
+
+    entries = read_status(since)
+    latest = entries[0]["id"] if entries else since
+    return jsonify({"entries": entries, "latest_id": latest})
+
+
+@main.route('/suite/status', methods=['POST'])
+def post_suite_status():
+    """
+    Push one status line. Accepts JSON or form fields:
+      app      required — which tool it came from, shown as a prefix
+      message  required — one short line; longer than 160 chars is trimmed
+      level    optional — idle (default) | ok | working | warning | blocked |
+                          error, colours the dot
+    """
+    if not _suite_token_ok():
+        return jsonify({"error": "invalid or missing token"}), 403
+
+    data = request.get_json(silent=True) or request.form
+    try:
+        entry = push_status(data.get('app'), data.get('message'), data.get('level'))
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except Exception as err:
+        # Redis down, most likely. Say so plainly rather than 500-ing blank: the
+        # caller is another program and its author has to debug this remotely.
+        return jsonify({"error": "could not reach the status feed: %s" % err}), 503
+
+    return jsonify(entry), 201
 
 
 # ── Task status polling ───────────────────────────────────────────────────────

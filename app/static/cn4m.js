@@ -136,20 +136,175 @@ function render_suite_rail() {
       + escape_html(tool.name) + '</a>';
   });
   $('#suite-links').html(links.join('<span class="obx-suite-sep">·</span>'));
-  set_app_status("Ready");
+}
+
+// "1 asset" / "12 assets", with an optional adjective:
+// asset_count(3, "new") -> "3 new assets". The status line has room for a count
+// and little else, so the wording stays this terse everywhere it's used.
+function asset_count(n, adjective) {
+  return n + " " + (adjective ? adjective + " " : "") + (n === 1 ? "asset" : "assets");
+}
+
+// How each level paints the status dot. "idle" is the unstyled default, so it
+// isn't listed. Keep in step with LEVELS in app/suite_status.py, which decides
+// what the feed will accept.
+const STATUS_LEVEL_CLASS = {
+  ok:      "obx-status-ok",
+  working: "obx-status-working",
+  warning: "obx-status-warning",
+  blocked: "obx-status-blocked",
+  error:   "obx-status-error",
+};
+
+const STATUS_LEVEL_CLASSES = Object.values(STATUS_LEVEL_CLASS).join(" ");
+
+// Repaint a dot for a level. Every status dot goes through here, so adding a
+// level is the map above plus a colour in the CSS — nothing else.
+function paint_status_dot(dot, level) {
+  return dot.removeClass(STATUS_LEVEL_CLASSES).addClass(STATUS_LEVEL_CLASS[level] || "");
 }
 
 // The status line at the right of the suite rail. Deliberately NOT a second home
 // for task progress — each pane already has its own progress text, and a status
 // bar that echoes them is just noise. This is for app-level state those can't
-// show: what's still waiting, what can't be reached.
-// level: "idle" (the default), "working", or "error" — it colours the dot.
+// show: what just happened, what's still waiting, what can't be reached.
+// level: "idle" (the default), "ok", "working", "warning", "blocked" or
+// "error" — it colours the dot. See LEVELS in app/suite_status.py.
 function set_app_status(text, level) {
-  const message = text || "";
-  $('#app-status-text').text(message).attr('title', message);
-  const dot = $('#app-status-dot').removeClass('obx-status-working obx-status-error');
-  if (level === "working") dot.addClass('obx-status-working');
-  if (level === "error") dot.addClass('obx-status-error');
+  // Every message routed through here is an event worth keeping, so the log
+  // fills itself — nothing that reports a status has to know it exists, and
+  // anything added later is recorded for free. record_status() paints the rail
+  // line from whatever ends up newest, this message included.
+  record_status({ text: text || "", level: level || "idle", ts: Date.now() / 1000 });
+}
+
+// Paint the rail's status line from one entry: dot, time, the tool's tag if it
+// came from elsewhere in the suite, then the message. Same four parts in the
+// same order as a row in the history tray, so the live line and the log read
+// as one thing rather than two formats.
+function render_status_line(entry) {
+  if (!entry) return;
+  paint_status_dot($('#app-status-dot'), entry.level);
+  $('#app-status-time').text(status_timestamp(entry.ts));
+  $('#app-status-app').text(entry.app || "").toggle(!!entry.app);
+  $('#app-status-text')
+    .text(entry.text)
+    .attr('title', (entry.app ? entry.app + " — " : "") + entry.text);
+}
+
+
+// ── Status history ────────────────────────────────────────────────────────────
+// The last few status messages, behind a caret on the status line. Collapsed by
+// default: "what just happened?" is an occasional question, not worth permanent
+// space in a rail this size.
+//
+// Memory only, deliberately. A log that survived a reload would present
+// yesterday's activity as though it had just happened; the honest scope for this
+// is the session you're looking at.
+
+const STATUS_HISTORY_LIMIT = 5;
+let status_history = [];   // newest first
+
+// 24h HH:MM, locale-independent. The tray covers one session, so the date never
+// matters, and a fixed clock time beats a relative one that needs a timer to
+// stay honest.
+function status_timestamp(ts) {
+  return new Date(ts ? ts * 1000 : Date.now()).toTimeString().slice(0, 5);
+}
+
+// Add entries and re-render. Sorted on ts rather than just prepended, because
+// the feed from the other suite tools arrives in polls: an entry pushed by
+// symmetry at 12:03 must not land above cn4m's own 12:04 line just because it
+// was fetched later.
+function record_status(/* ...entries */) {
+  status_history = status_history.concat(Array.prototype.slice.call(arguments))
+    .sort(function(a, b) { return b.ts - a.ts; })
+    .slice(0, STATUS_HISTORY_LIMIT);
+  // The rail shows whatever is newest, wherever it came from. Sorting first
+  // means a suite message that arrived in a poll but happened before cn4m's own
+  // last event doesn't get to jump in front of it.
+  render_status_line(status_history[0]);
+  render_status_history();
+}
+
+function render_status_history() {
+  const rows = status_history.map(function(entry) {
+    const level = STATUS_LEVEL_CLASS[entry.level] ? " " + STATUS_LEVEL_CLASS[entry.level] : "";
+    // Entries from elsewhere in the suite are labelled; cn4m's own are not —
+    // you already know which app you're looking at.
+    const from = entry.app ? '<span class="obx-status-app">' + escape_html(entry.app) + '</span>' : '';
+    return '<div class="obx-status-history-row">'
+      + '<span class="obx-status-dot' + level + '"></span>'
+      + '<span class="obx-status-time">' + escape_html(status_timestamp(entry.ts)) + '</span>'
+      + from
+      + '<span class="obx-status-entry">' + escape_html(entry.text) + '</span>'
+      + '</div>';
+  });
+  $('#app-status-history').html(rows.length ? rows.join("")
+    : '<div class="obx-status-history-empty">No activity yet</div>');
+  // The caret is the only hint the tray is there, so it turns up once there's
+  // more to see than the line already on show.
+  $('#app-status-caret').toggle(status_history.length > 1);
+}
+
+function toggle_status_history(show) {
+  const tray = $('#app-status-history');
+  const open = show === undefined ? !tray.is(':visible') : show;
+  tray.toggle(open);
+  $('#app-status-toggle').toggleClass('obx-status-open', open);
+}
+
+// ── Suite status feed ─────────────────────────────────────────────────────────
+// The rest of the suite pushes short lines to POST /suite/status; this pulls
+// them in. Polling rather than a socket keeps it in step with how the rest of
+// this app talks to the backend, and these are occasional messages — a ten
+// second lag on "symmetry finished syncing" costs nothing.
+//
+// Entries are requested by id (?since=), not by time, so a message can never be
+// shown twice and a slow poll simply catches up.
+
+const SUITE_STATUS_POLL_MS = 10000;
+let suite_status_last_id = 0;
+
+function poll_suite_status() {
+  $.getJSON('/suite/status', { since: suite_status_last_id })
+    .done(function(data) {
+      const entries = (data && data.entries) || [];
+      if (data && data.latest_id) suite_status_last_id = data.latest_id;
+      if (!entries.length) return;
+
+      record_status.apply(null, entries.map(function(entry) {
+        return {
+          text: entry.message || "",
+          app: entry.app || "",
+          level: entry.level || "idle",
+          ts: entry.ts || (Date.now() / 1000),
+        };
+      }));
+
+      // No painting here: record_status() has already put whichever entry is
+      // newest on the rail, so a suite message can't bury cn4m's own last word
+      // just by arriving later than it happened.
+    });
+  // A failed poll is deliberately silent: the feed is a nicety, and turning the
+  // rail red because another tool's message didn't arrive would be worse than
+  // saying nothing.
+}
+
+function start_suite_status_polling() {
+  poll_suite_status();
+  setInterval(poll_suite_status, SUITE_STATUS_POLL_MS);
+}
+
+function wire_status_history() {
+  $('#app-status-toggle').click(function(e) {
+    e.stopPropagation();          // don't trip the close-on-click-outside below
+    toggle_status_history();
+  });
+  $('#app-status-history').click(function(e) { e.stopPropagation(); });
+  // Click anywhere else, or Esc — the same dismissal the rename dialog uses.
+  $(document).click(function() { toggle_status_history(false); });
+  $(document).keydown(function(e) { if (e.key === "Escape") toggle_status_history(false); });
 }
 
 
@@ -253,7 +408,8 @@ function update_progress(status_task, status_url) {
       msg_pending = "Starting Approval"
       msg_progress = "Approving Assets"
       msg_complete = "Approval Complete"
-      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete,
+        function(data) { set_app_status("Approved " + asset_count(data['total'] || 0)); })
       break;
 
     case "quarantine_assets":
@@ -269,7 +425,12 @@ function update_progress(status_task, status_url) {
       msg_pending = "Connecting to Google Sheet"
       msg_progress = "Tracking Assets"
       msg_complete = "Assets Pushed to Tracker"
-      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete,
+        function(data) {
+          const pushed = data['total'] || 0;
+          set_app_status(pushed ? asset_count(pushed) + " pushed to the Google Sheet"
+                                : "Nothing waiting to be pushed");
+        })
       break;
 
     case "check_assets":
@@ -623,6 +784,29 @@ function tracked_formatter(cell) {
     : '<span class="tracked-no" title="not yet pushed to the Google Sheet">&ndash;</span>';
 }
 
+// The full filename on disk, version and extension included — NAME shows only
+// the id and description. Browse-only: on the ingest table the same information
+// is already spread across NAME, SCREEN, VERSION and EXT for the file you're
+// actively reviewing, whereas on the browse tabs you're usually hunting for one
+// specific delivery by the name someone quoted at you.
+const FILENAME_COLUMN = {
+  title: "Filename",
+  field: "filename",
+  maxInitialWidth: 320,
+  ...TEXT_FILTER,
+};
+
+// When the scan first saw the file. Sorts as text because the format is
+// YYYY-MM-DD HH:MM:SS, which orders correctly that way, and filters as text so
+// typing a date shows that day's deliveries.
+const PROCESSED_COLUMN = {
+  title: "Processed",
+  field: "processed",
+  sorter: "string",
+  maxInitialWidth: 150,
+  ...TEXT_FILTER,
+};
+
 const TRACKED_COLUMN = {
   title: "Tracked",
   field: "tracked",
@@ -638,11 +822,12 @@ const TRACKED_COLUMN = {
 };
 
 function asset_columns(options) {
-  const trailing = (options && options.tracked) ? [TRACKED_COLUMN] : [];
+  const browse = !!(options && options.browse);
+  const trailing = browse ? [PROCESSED_COLUMN, TRACKED_COLUMN] : [];
   // Only the ingest table gets the conflict column — the browse tabs list what
   // was already accepted, where the comparison has no one to answer to.
   const leading = (options && options.conflicts) ? [CONFLICT_COLUMN] : [];
-  return leading.concat([
+  const columns = leading.concat([
     { title: "Folder",        field: "parent",         formatter: folder_formatter,  maxInitialWidth: 260, ...TEXT_FILTER },
     { title: "Name",          field: "name",           formatter: name_formatter,    maxInitialWidth: 340, ...TEXT_FILTER },
     { title: "Screen / Stem", field: "screen",         sorter: screen_sorter,        maxInitialWidth: 180, ...LIST_FILTER },
@@ -659,6 +844,15 @@ function asset_columns(options) {
     { title: "Ch",            field: "audio_channels", sorter: "number", ...number_filter() },
     { title: "Size",          field: "size",           sorter: raw_number_sorter("size_bytes"), ...number_filter("size_bytes", 1048576, "= > < MiB"), minWidth: 95 },
   ]).concat(trailing);
+
+  // FILENAME belongs beside NAME rather than out at the end — they're the same
+  // thing at different resolution, and reading one against the other is the
+  // point. Spliced in rather than written into the list above so the shared
+  // column order stays in one readable block.
+  if (browse) {
+    columns.splice(columns.findIndex(column => column.field === "name") + 1, 0, FILENAME_COLUMN);
+  }
+  return columns;
 }
 
 // Flatten the scan result (keyed by fileid) into Tabulator's row array. Values
@@ -694,6 +888,9 @@ function asset_rows(assets_by_id) {
     audio_channels: asset.audio_channels,
     size: asset.size || "",
     size_bytes: asset.size_bytes,
+    // When the scan first saw the file. No column shows it; the browse tabs
+    // order on it so the most recent deliveries are at the top.
+    processed: asset.processed || "",
     tracked: !!asset.tracked,  // set by /assets/<bucket>; absent (false) on a scan
     };
     row.qc_fail = row_qc_fails(row);  // stamped once here; the toggle filters on it
@@ -705,7 +902,7 @@ function asset_rows(assets_by_id) {
 // is built here, so columns, QC formatting, filters, clipboard and the
 // right-click menu stay identical across them. Options:
 //   selectable      checkbox column + row selection (ingest only)
-//   tracked         show the TRACKED column (browse tabs only)
+//   browse          add the browse-only columns: FILENAME, PROCESSED, TRACKED
 //   persistence_id  separate localStorage key per table
 //   data            initial rows
 //   placeholder     empty-state text
@@ -813,7 +1010,7 @@ function update_browse_status(name) {
   if (!table) return;
   const total = table.getDataCount();
   const selected = table.getSelectedRows().length;
-  const label = total === 1 ? "1 asset" : total + " assets";
+  const label = asset_count(total);
   $('#' + name + '_status').text(selected ? label + " \u00b7 " + selected + " selected" : label);
 }
 
@@ -824,15 +1021,34 @@ function browse_selection_handler(name) {
   table.on("rowSelectionChanged", () => update_browse_status(name));
 }
 
+// APPROVED and QUARANTINED open with the most recently processed assets at the
+// top: these tabs are for looking back over what has arrived, and the last
+// delivery is nearly always the one being asked about. Sorting the rows rather
+// than setting a Tabulator sort keeps every column header free — click one and
+// you get that sort instead, exactly as before.
+//
+// "processed" is when the scan first saw the file (YYYY-MM-DD HH:MM:SS, so it
+// compares as text). Entries scanned before that field existed have none, and
+// sink to the bottom rather than claiming to be oldest or newest.
+function by_newest_first(rows) {
+  return rows.sort(function(a, b) {
+    const left = a.processed || "", right = b.processed || "";
+    if (!left && !right) return 0;
+    if (!left) return 1;
+    if (!right) return -1;
+    return right.localeCompare(left);
+  });
+}
+
 function load_browse_tab(name) {
   const status = $('#' + name + '_status');
   status.text("Loading\u2026");
 
   $.getJSON('/assets/' + name)
     .done(function(data) {
-      const rows = asset_rows(data);
+      const rows = by_newest_first(asset_rows(data));
       const count = rows.length;
-      status.text(count === 1 ? "1 asset" : count + " assets");
+      status.text(asset_count(count));
 
       browse_selection_handler(name);
 
@@ -846,11 +1062,13 @@ function load_browse_tab(name) {
 
       browse_tables[name] = create_asset_table('#' + name + '-results', {
         data: rows,
-        tracked: true,        // these views span both tracked and untracked
+        browse: true,         // adds the FILENAME, PROCESSED and TRACKED columns
         selectable: true,     // rows can be picked for transcoding
-        // -v2: bumped when TRACKED moved to the last column. Persisted layouts
-        // store column order, so a stale -v1 layout would keep it up front.
-        persistence_id: "cn4m-" + name + "-v2",
+        // -v3: bumped when FILENAME and PROCESSED were added. Persisted layouts
+        // store column order, and Tabulator appends columns they don't know
+        // about to the end — which would strand FILENAME past every technical
+        // column instead of next to NAME. (-v2 was TRACKED moving to the end.)
+        persistence_id: "cn4m-" + name + "-v3",
         placeholder: "No " + BROWSE_LABELS[name] + " assets.",
       });
     })
@@ -1041,9 +1259,7 @@ function reveal_track_pane_if_pending() {
     if (count > 0) reveal_track_pane();
     // Seed the suite rail with something the per-pane progress lines don't say:
     // what is still sitting between approval and the Google Sheet.
-    set_app_status(count
-      ? count + (count === 1 ? " asset" : " assets") + " waiting to be tracked"
-      : "Ready");
+    if (count) set_app_status(asset_count(count) + " waiting to be tracked");
   }).fail(function() {
     set_app_status("Could not reach the cn4m server", "error");
   });
@@ -1221,6 +1437,9 @@ function handle_check_assets_progress(status_task, status_url) {
         render_asset_table(data_sorted);
         reveal_review_pane();
 
+        const found = Object.keys(data_sorted).length;
+        set_app_status(found ? "Discovered " + asset_count(found, "new") : "No new assets found");
+
         // ── Flag display ───────────────────────────────────────────────────────
         // Show any flagged (invalid/missing) files below the table, then clear them
         // so they only appear once (on the scan that found them).
@@ -1267,7 +1486,9 @@ function get_file_type_icon(ext) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Generic progress poller used by all tasks except check_assets
-function get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete) {
+// on_complete (optional) is handed the finished task's payload once, when it
+// reports COMPLETE — used to put a one-line summary in the suite rail's status.
+function get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete, on_complete) {
   $.getJSON(status_url, function(data) {
           percent = parseInt(data['current'] * 100 / data['total']);
           if (data['state'] == 'PENDING') {
@@ -1282,6 +1503,7 @@ function get_update_progress_feedback(status_task, status_url, msg_destination, 
               update_progress(status_task, status_url);
           } else if (data['status'] == 'COMPLETE') {
               message = msg_complete
+              if (on_complete) on_complete(data);
           } else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
               if ('result' in data) {
                   message = 'Result: ' + data['result']
