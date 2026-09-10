@@ -66,7 +66,7 @@ Only the first three are configured here, in [docker-compose.yaml](docker-compos
 
 A thin rail across the top of the cn4m UI links to the other tools, marking cn4m itself as the one you're in. The links are built from the port plus `window.location.hostname`, so opening cn4m on the NAS from a laptop gives you links to the tools **on the NAS** — the list lives in `SUITE_TOOLS` at the top of [app/static/cn4m.js](app/static/cn4m.js), and adding a tool is one line.
 
-The right of that rail is a status line, reporting what cn4m has just done (`Discovered 12 new assets`, `Approved 5 assets`, `12 assets pushed to the Google Sheet`) alongside anything the other tools have pushed to it. It is deliberately not a second home for task progress — each pane already has its own progress text. Click it for the last five entries with timestamps, the other tools' messages prefixed with their name; click anywhere else or press Esc to close. The history is per-session and lives only in the browser, so a reload starts it fresh rather than presenting yesterday's activity as though it had just happened.
+The right of that rail is a status line, reporting what cn4m has just done (`Discovered 12 new assets`, `Approved 5 assets`, `12 assets pushed to the Google Sheet`) alongside anything the other tools have pushed to it. A scan or a transcode shows its percentage there while it runs (`45% · Transcoding 1000_test_v1.mov`), then the outcome. Click it for the last five entries with timestamps, the other tools' messages tagged with their name; click anywhere else or press Esc to close. Progress ticks are not kept — only outcomes — so the five slots aren't flushed by one long scan. The history is per-session and lives only in the browser, so a reload starts it fresh rather than presenting yesterday's activity as though it had just happened.
 
 Publishing 2642 at all is only so you can inspect Redis from the host — the worker reaches it over the Docker network either way, and you can drop that mapping without affecting anything.
 
@@ -127,6 +127,23 @@ The feed lives in Redis, capped at the last 20 entries: it survives a page reloa
 
 **Security.** The endpoint is open by default, like the rest of cn4m, which assumes a trusted LAN. Setting `SUITE_STATUS_TOKEN` in `.env` requires callers to send it as an `X-CN4M-Token` header (or a `token` field) — worth doing the moment anything outside that LAN can reach port 2640, since this endpoint writes text that everyone's UI displays.
 
+### Triggering a cascade sync
+
+A **sync** button sits beside the cascade link in the rail and fires a cn4m-cascade job hook. Point it at one in `.env`:
+
+```
+CASCADE_SYNC_URL=http://host.docker.internal:2649/api/hooks/jobs/<job-id>/run
+CASCADE_SYNC_TOKEN=<bearer token>
+```
+
+Leave `CASCADE_SYNC_URL` unset and no button appears, so an install that doesn't run cascade isn't offered one that always fails. `CASCADE_SYNC_TOKEN` is optional — omit it for a hook that wants no auth.
+
+**Use `host.docker.internal`, not `127.0.0.1`.** cn4m runs in a container, where `127.0.0.1` is the container itself. A hook you would reach on the host as `127.0.0.1:2649` is `host.docker.internal:2649` from in there; if cascade is itself a container on this Docker network, use its service name. A wrong host here shows up as `could not reach cascade: Connection refused` in the status rail.
+
+The request is made by cn4m rather than by the browser, deliberately: the hook needs a bearer token, and a token the page can read is a token anyone with the page can read. Nothing about the target reaches the frontend — it only learns whether a button should exist.
+
+Pressing it reports that cascade *accepted* the request; the job then runs on cascade's own clock. If cascade posts to [the suite status feed](#suite-status-feed) when it finishes, that turns up in the same rail a moment later.
+
 **Upgrading from an earlier version?** The web GUI moved from 5000 to 2640 and Flower from 5555 to 2641, so `docker compose up -d` is required to republish the ports (a plain `restart` keeps the old mapping). Update any bookmarks.
 
 ---
@@ -148,6 +165,8 @@ All settings live in the `.env` file in the project root (copy `.env.example` to
 | `QC_RESOLUTION` | | Resolution rules, comma-separated. `SCREEN@WxH` applies to files on that screen; a bare `WxH` applies to every file, including files with no screen field (e.g. `A1@112x336, 1920x1080`). A file passes if it matches any applicable rule. Omit to skip resolution QC. |
 | `QC_FPS` | | Comma-separated allowed framerates (e.g. `29.97, 30`). Omit to skip framerate QC. |
 | `TIME_BETWEEN_CHECKS` | | Delay (seconds) between processing each file — keeps progress updates responsive in the UI. Default: `0.001` |
+| `CASCADE_SYNC_URL` | | cn4m-cascade job hook fired by the rail's **sync** button. Unset means no button — see [Triggering a cascade sync](#triggering-a-cascade-sync). |
+| `CASCADE_SYNC_TOKEN` | | Bearer token for that hook. Omit if it needs none. |
 | `SUITE_STATUS_TOKEN` | | Shared secret for the suite status feed (`POST /suite/status`). Unset means the endpoint is open — see [Suite status feed](#suite-status-feed). |
 | `SECRET_KEY` | | Random string for Flask session security. Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 

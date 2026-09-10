@@ -122,7 +122,7 @@ const SUITE_TOOLS = [
   { name: "inbound",   port: 2645 },
   { name: "smartsync", port: 2646 },
   { name: "symmetry",  port: 2647 },
-  { name: "cascade",   port: 2649 },
+  { name: "cascade",   port: 2649, sync: true },   // gets the SYNC button; see wire_cascade_sync
 ];
 
 function render_suite_rail() {
@@ -132,8 +132,15 @@ function render_suite_rail() {
     }
     const url = window.location.protocol + "//" + window.location.hostname + ":" + tool.port + "/";
     // New tab on purpose: switching tools shouldn't discard a review in progress.
-    return '<a href="' + escape_html(url) + '" target="_blank" rel="noopener">'
+    let html = '<a href="' + escape_html(url) + '" target="_blank" rel="noopener">'
       + escape_html(tool.name) + '</a>';
+    // An action button rides along inside the tool's own fragment, so it sits
+    // against its name rather than becoming another separator-delimited item.
+    if (tool.sync) {
+      html += ' <button type="button" class="obx-suite-action" id="cascade-sync"'
+        + ' style="display:none;" title="Trigger a sync in cn4m-cascade">sync</button>';
+    }
+    return html;
   });
   $('#suite-links').html(links.join('<span class="obx-suite-sep">·</span>'));
 }
@@ -164,18 +171,47 @@ function paint_status_dot(dot, level) {
   return dot.removeClass(STATUS_LEVEL_CLASSES).addClass(STATUS_LEVEL_CLASS[level] || "");
 }
 
-// The status line at the right of the suite rail. Deliberately NOT a second home
-// for task progress — each pane already has its own progress text, and a status
-// bar that echoes them is just noise. This is for app-level state those can't
-// show: what just happened, what's still waiting, what can't be reached.
+// The status line at the right of the suite rail: what just happened, here or
+// anywhere else in the suite. Everything routed through here is recorded in the
+// history, so it's for outcomes — a running task's percentage goes through
+// set_app_progress() below, which deliberately keeps no record.
 // level: "idle" (the default), "ok", "working", "warning", "blocked" or
 // "error" — it colours the dot. See LEVELS in app/suite_status.py.
-function set_app_status(text, level) {
+function set_app_status(text, level, app) {
+  app_progress_active = false;   // a task reporting an outcome has finished
   // Every message routed through here is an event worth keeping, so the log
   // fills itself — nothing that reports a status has to know it exists, and
   // anything added later is recorded for free. record_status() paints the rail
   // line from whatever ends up newest, this message included.
-  record_status({ text: text || "", level: level || "idle", ts: Date.now() / 1000 });
+  record_status({ text: text || "", level: level || "idle", app: app || "", ts: Date.now() / 1000 });
+}
+
+// True while a task is reporting progress, so the rail belongs to it until it
+// finishes. Without this a suite message arriving mid-scan would be painted over
+// by the next progress tick a fraction of a second later — a flicker, and
+// nothing you could read. It still lands in the history either way.
+let app_progress_active = false;
+
+// A running task's progress. Paints the same line as set_app_status() but keeps
+// no record: progress ticks arrive continuously (the poller re-requests as soon
+// as the server answers), so recording them would flush all five history slots
+// in seconds and leave "62% · Checking foo.mov" standing as the account of a
+// scan that finished minutes ago.
+// "45% · Transcoding 1000_test_v1.mov". The percentage leads because the rail
+// truncates from the right — the number is what you want to survive a long
+// filename, not the other way round.
+function progress_text(verb, percent, subject) {
+  const parts = [];
+  if (percent !== null && !isNaN(percent)) parts.push(percent + "%");
+  // A task whose own status text already names the action passes no verb.
+  const action = [verb, subject].filter(Boolean).join(" ");
+  if (action) parts.push(action);
+  return parts.join(" · ");
+}
+
+function set_app_progress(text, level) {
+  app_progress_active = true;
+  render_status_line({ text: text || "", level: level || "working", ts: Date.now() / 1000 });
 }
 
 // Paint the rail's status line from one entry: dot, time, the tool's tag if it
@@ -223,7 +259,10 @@ function record_status(/* ...entries */) {
   // The rail shows whatever is newest, wherever it came from. Sorting first
   // means a suite message that arrived in a poll but happened before cn4m's own
   // last event doesn't get to jump in front of it.
-  render_status_line(status_history[0]);
+  // A task mid-run keeps the line until it reports an outcome — the entry is
+  // still recorded, it just doesn't flash up behind a percentage that is about
+  // to repaint over it.
+  if (!app_progress_active) render_status_line(status_history[0]);
   render_status_history();
 }
 
@@ -253,6 +292,42 @@ function toggle_status_history(show) {
   tray.toggle(open);
   $('#app-status-toggle').toggleClass('obx-status-open', open);
 }
+
+// ── Cascade sync ──────────────────────────────────────────────────────────────
+// The SYNC button beside the cascade link. cn4m makes the outbound call itself
+// (POST /cascade/sync) rather than the browser calling cascade directly: the
+// hook needs a bearer token, and a token the page can read is a token anyone
+// with the page can read. Nothing about the target is known on this side.
+
+function wire_cascade_sync() {
+  // Ask before showing it. An install that doesn't run cascade gets no button
+  // at all, rather than one that fails every time it's pressed.
+  $.getJSON('/cascade/sync', function(data) {
+    if (data && data.configured) $('#cascade-sync').show();
+  });
+  $('#cascade-sync').click(trigger_cascade_sync);
+}
+
+function trigger_cascade_sync() {
+  const button = $('#cascade-sync');
+  if (button.prop('disabled')) return;      // a second click while one is in flight
+  button.prop('disabled', true);
+  set_app_progress("Triggering cascade sync…");
+
+  $.post('/cascade/sync')
+    .done(function() {
+      // Only that cascade accepted it — the job runs over there on its own
+      // clock. If cascade pushes to /suite/status when it finishes, that turns
+      // up in this same rail a moment later.
+      set_app_status("Sync triggered", "ok", "cascade");
+    })
+    .fail(function(xhr) {
+      const reason = (xhr.responseJSON && xhr.responseJSON.error) || "sync request failed";
+      set_app_status(reason, "error", "cascade");
+    })
+    .always(function() { button.prop('disabled', false); });
+}
+
 
 // ── Suite status feed ─────────────────────────────────────────────────────────
 // The rest of the suite pushes short lines to POST /suite/status; this pulls
@@ -409,7 +484,7 @@ function update_progress(status_task, status_url) {
       msg_progress = "Approving Assets"
       msg_complete = "Approval Complete"
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete,
-        function(data) { set_app_status("Approved " + asset_count(data['total'] || 0)); })
+        { complete: function(data) { set_app_status("Approved " + asset_count(data['total'] || 0), "ok"); } })
       break;
 
     case "quarantine_assets":
@@ -426,11 +501,11 @@ function update_progress(status_task, status_url) {
       msg_progress = "Tracking Assets"
       msg_complete = "Assets Pushed to Tracker"
       get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete,
-        function(data) {
-          const pushed = data['total'] || 0;
-          set_app_status(pushed ? asset_count(pushed) + " pushed to the Google Sheet"
-                                : "Nothing waiting to be pushed");
-        })
+        { complete: function(data) {
+            const pushed = data['total'] || 0;
+            set_app_status(pushed ? asset_count(pushed) + " pushed to the Google Sheet"
+                                  : "Nothing waiting to be pushed", pushed ? "ok" : "idle");
+          } })
       break;
 
     case "check_assets":
@@ -445,7 +520,14 @@ function update_progress(status_task, status_url) {
       msg_complete = transcode_progress_destination === "#review_asset_progress"
         ? "Transcode Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
         : "Transcode Complete"
-      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete, {
+        progress: function(data, percent) {
+          set_app_progress(progress_text("Transcoding", percent, data['status']));
+        },
+        complete: function(data) {
+          set_app_status("Transcoded " + asset_count(data['total'] || 0), "ok");
+        },
+      })
       break;
 
     case "quarantine_and_transcode":
@@ -453,7 +535,17 @@ function update_progress(status_task, status_url) {
       msg_pending = "Starting Quarantine & Transcode"
       msg_progress = "Processing"
       msg_complete = "Quarantine & Transcode Complete - <a href=\"#\" onclick=\"check_assets()\">Click to Re-Check Assets</a>"
-      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete, {
+        // data.status already reads "transcoding x.mov" / "quarantining x.mov",
+        // so it says which of the two phases is running without help from here.
+        progress: function(data, percent) {
+          set_app_progress(progress_text("", percent, data['status']));
+        },
+        // The task counts both phases, so total is twice the asset count.
+        complete: function(data) {
+          set_app_status("Transcoded and quarantined " + asset_count(Math.round((data['total'] || 0) / 2)), "ok");
+        },
+      })
       break;
   }
 }
@@ -1414,6 +1506,7 @@ function handle_check_assets_progress(status_task, status_url) {
 
     if (data['state'] == 'PENDING') {
         message = "Starting Asset Check"
+        set_app_progress(progress_text("Starting asset check", null));
         update_progress(status_task, status_url);
 
     } else if (data['state'] == 'PROGRESS') {
@@ -1422,6 +1515,7 @@ function handle_check_assets_progress(status_task, status_url) {
         } else {
             message = percent + "% Complete - Checking Asset " + data['status']
         }
+        set_app_progress(progress_text("Checking", data['total'] ? percent : null, data['status']));
         update_progress(status_task, status_url);
 
     } else if (data['status'] == 'COMPLETE') {
@@ -1438,7 +1532,7 @@ function handle_check_assets_progress(status_task, status_url) {
         reveal_review_pane();
 
         const found = Object.keys(data_sorted).length;
-        set_app_status(found ? "Discovered " + asset_count(found, "new") : "No new assets found");
+        set_app_status(found ? "Discovered " + asset_count(found, "new") : "No new assets found", "ok");
 
         // ── Flag display ───────────────────────────────────────────────────────
         // Show any flagged (invalid/missing) files below the table, then clear them
@@ -1486,13 +1580,17 @@ function get_file_type_icon(ext) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Generic progress poller used by all tasks except check_assets
-// on_complete (optional) is handed the finished task's payload once, when it
-// reports COMPLETE — used to put a one-line summary in the suite rail's status.
-function get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete, on_complete) {
+// rail (optional) mirrors the task to the suite rail's status line:
+//   rail.progress(data, percent)  every poll while the task is running
+//   rail.complete(data)           once, when it reports COMPLETE
+// Both are optional. A task that passes neither behaves exactly as before,
+// writing only to its own pane.
+function get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete, rail) {
   $.getJSON(status_url, function(data) {
           percent = parseInt(data['current'] * 100 / data['total']);
           if (data['state'] == 'PENDING') {
               message = msg_pending
+              if (rail && rail.progress) rail.progress(data, null);
               update_progress(status_task, status_url);
           } else if (data['state'] == 'PROGRESS') {
               if (data['total'] == 0) {
@@ -1500,10 +1598,11 @@ function get_update_progress_feedback(status_task, status_url, msg_destination, 
               } else {
                   message = percent + "% Complete - " + msg_progress + " " + data['status']
               }
+              if (rail && rail.progress) rail.progress(data, data['total'] ? percent : null);
               update_progress(status_task, status_url);
           } else if (data['status'] == 'COMPLETE') {
               message = msg_complete
-              if (on_complete) on_complete(data);
+              if (rail && rail.complete) rail.complete(data);
           } else if (data['state'] != 'PENDING' && data['state'] != 'PROGRESS') {
               if ('result' in data) {
                   message = 'Result: ' + data['result']

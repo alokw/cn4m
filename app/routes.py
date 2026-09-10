@@ -10,6 +10,7 @@ from app.helpers import (get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutio
                          parse_qc_fps, get_json_file, ASSETS_JSON)
 from app.suite_status import push_status, read_status
 import os
+import requests
 
 main = Blueprint("main", __name__)
 
@@ -200,6 +201,62 @@ def post_suite_status():
         return jsonify({"error": "could not reach the status feed: %s" % err}), 503
 
     return jsonify(entry), 201
+
+
+# ── Cascade sync ──────────────────────────────────────────────────────────────
+# The SYNC button in the suite rail fires a job hook in cn4m-cascade. The
+# outbound request is made here, not from the browser, because it carries a
+# bearer token — putting that in cn4m.js would hand it to anyone who opens the
+# page or reads the served JavaScript.
+#
+# Both halves come from .env so the target can be repointed without a code
+# change: CASCADE_SYNC_URL is the hook, CASCADE_SYNC_TOKEN the bearer token
+# (optional — omit it for a hook that doesn't want one).
+
+# A job hook only has to accept the request, not run the job, so this is a
+# generous ceiling rather than an expected wait.
+CASCADE_SYNC_TIMEOUT = 15
+
+
+@main.route('/cascade/sync', methods=['GET'])
+def cascade_sync_configured():
+    """
+    Whether a sync target is set. The rail asks before showing the button, so an
+    install that doesn't use cascade gets no button rather than one that always
+    fails.
+    """
+    return jsonify({"configured": bool((os.getenv("CASCADE_SYNC_URL") or "").strip())})
+
+
+@main.route('/cascade/sync', methods=['POST'])
+def cascade_sync():
+    """
+    Fire the configured cn4m-cascade job hook.
+
+    Reports only that cascade accepted the request — the job itself runs over
+    there on its own clock. If it pushes to /suite/status when it finishes, that
+    lands in the same rail a moment later.
+    """
+    url = (os.getenv("CASCADE_SYNC_URL") or "").strip()
+    if not url:
+        return jsonify({"error": "CASCADE_SYNC_URL is not set in .env"}), 501
+
+    token = (os.getenv("CASCADE_SYNC_TOKEN") or "").strip()
+    headers = {"Authorization": "Bearer " + token} if token else {}
+
+    try:
+        response = requests.post(url, headers=headers, timeout=CASCADE_SYNC_TIMEOUT)
+    except requests.RequestException as err:
+        # Nearly always either cascade being down or CASCADE_SYNC_URL pointing at
+        # 127.0.0.1, which inside this container means the container itself.
+        return jsonify({"error": "could not reach cascade: %s" % err}), 502
+
+    if not response.ok:
+        detail = " ".join((response.text or "").split())[:200]
+        return jsonify({"error": "cascade returned %d%s"
+                                 % (response.status_code, ": " + detail if detail else "")}), 502
+
+    return jsonify({"ok": True, "status": response.status_code})
 
 
 # ── Task status polling ───────────────────────────────────────────────────────

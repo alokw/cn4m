@@ -137,6 +137,36 @@ body {
 	color: #F99D38;
 }
 
+/* An action a tool exposes to cn4m, sitting against that tool's name. Reads as
+   a button rather than another link because it does something rather than going
+   somewhere — see the SYNC button beside cascade. */
+.obx-suite-action {
+	background-color: #2a2a2a;
+	border: 1px solid #444444;
+	border-radius: 3px;
+	color: #9a9a9a;
+	cursor: pointer;
+	font: inherit;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	line-height: 1.35;
+	margin-left: 0.15rem;
+	padding: 0 5px;
+	transition-duration: 0.3s;
+}
+
+.obx-suite-action:hover {
+	border-color: #F99D38;
+	color: #F99D38;
+}
+
+.obx-suite-action:disabled,
+.obx-suite-action:disabled:hover {
+	border-color: #333333;
+	color: #5a5a5a;
+	cursor: default;
+}
+
 /* The tool doing the rendering — a "you are here", not a link */
 .obx-suite-current {
 	color: #dfdfdf;
@@ -276,8 +306,6 @@ body {
 	display: none;
 }
 
-/* Which suite tool an entry came from. cn4m's own entries carry no label, so
-   the column is ragged by design — a label means "this happened elsewhere". */
 /* Which suite tool an entry came from, on the rail line and on every history
    row. A tag rather than coloured text: at this size the border is what makes
    it read as a label on the message rather than the first word of it. cn4m's
