@@ -8,7 +8,7 @@ from app.tasks import *
 from app import celery
 from app.helpers import (get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions,
                          parse_qc_fps, get_json_file, ASSETS_JSON)
-from app.suite_status import push_status, read_status
+from app.suite_status import push_status, read_status, read_log
 import os
 import requests
 
@@ -203,6 +203,51 @@ def post_suite_status():
     return jsonify(entry), 201
 
 
+# ── Log ───────────────────────────────────────────────────────────────────────
+# The full record behind the rail. Everything pushed to the feed above is in
+# here too; the extra route is for cn4m's own outcomes, which the browser
+# paints on its rail itself and sends here just to be kept.
+
+@main.route('/log')
+def log_page():
+    """The log page, linked from the bottom of the rail's status tray."""
+    return render_template('log.html')
+
+
+@main.route('/log/entries', methods=['GET'])
+def get_log():
+    """The log, newest first. ?since=<id> works exactly as it does on the feed."""
+    try:
+        since = int(request.args.get('since', 0))
+    except (TypeError, ValueError):
+        since = 0
+
+    entries = read_log(since)
+    latest = entries[0]["id"] if entries else since
+    return jsonify({"entries": entries, "latest_id": latest})
+
+
+@main.route('/log', methods=['POST'])
+def post_log():
+    """
+    Record one of cn4m's own outcomes ("Approved 5 assets"). Log only — the
+    browser that sent it has already painted it, and the rail is per-browser.
+
+    No token: this is the UI talking to its own server, and the page can't be
+    given the suite secret without publishing it. The app name is pinned to
+    cn4m rather than read from the request, so the most this route can be
+    misused for is a cn4m-tagged line in the log, never a message in the rail.
+    """
+    data = request.get_json(silent=True) or request.form
+    try:
+        entry = push_status("cn4m", data.get('message'), data.get('level'), feed=False)
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    except Exception as err:
+        return jsonify({"error": "could not reach the log: %s" % err}), 503
+    return jsonify(entry), 201
+
+
 # ── Cascade sync ──────────────────────────────────────────────────────────────
 # The SYNC button in the suite rail fires a job hook in cn4m-cascade. The
 # outbound request is made here, not from the browser, because it carries a
@@ -233,9 +278,9 @@ def cascade_sync():
     """
     Fire the configured cn4m-cascade job hook.
 
-    Reports only that cascade accepted the request — the job itself runs over
-    there on its own clock. If it pushes to /suite/status when it finishes, that
-    lands in the same rail a moment later.
+    Says only whether cascade accepted the request. What the job then does is
+    cascade's to report, through /suite/status — the rail deliberately says
+    nothing on cn4m's behalf about a sync it only started.
     """
     url = (os.getenv("CASCADE_SYNC_URL") or "").strip()
     if not url:

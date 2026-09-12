@@ -16,10 +16,17 @@ from datetime import datetime
 
 import redis
 
-# Newest first. Capped — this is an activity glance, not a log.
+# Two lists, one counter. The feed is what the rail polls: newest first, capped
+# short, because it is an activity glance. The log is the full record behind
+# the "full log" link in the rail's tray — everything that goes into the feed
+# goes into the log too, and cn4m's own outcomes go into the log only (they
+# are painted on the rail locally by the browser that caused them). Ids come
+# from one counter so a "since" cursor means the same thing against either.
 FEED_KEY = "cn4m:suite:status"
+LOG_KEY = "cn4m:suite:log"
 COUNTER_KEY = "cn4m:suite:status:id"
 FEED_LIMIT = 20
+LOG_LIMIT = 2000
 
 # A status line has to fit a narrow rail; anything longer is truncated rather
 # than rejected, so a chatty caller still gets seen instead of silently failing.
@@ -102,14 +109,20 @@ def clean_entry(app_name, message, level):
     return app_name, message, level
 
 
-def push_status(app_name, message, level="idle"):
+def push_status(app_name, message, level="idle", feed=True):
     """
-    Add one entry to the feed and return it. Ids come from a Redis counter so
-    the UI can ask for "everything after the last one I saw" and never show a
-    message twice, which a timestamp alone can't promise.
+    Add one entry to the log — and, unless feed=False, to the feed — and
+    return it. Ids come from a Redis counter so the UI can ask for "everything
+    after the last one I saw" and never show a message twice, which a
+    timestamp alone can't promise.
+
+    feed=False is for cn4m's own outcomes, which the browser has already put on
+    its rail: they are worth keeping in the log, but re-broadcasting them
+    through the feed would paint them twice.
     """
     app_name, message, level = clean_entry(app_name, message, level)
     client = _redis()
+    now = datetime.now()
 
     entry = {
         "id": client.incr(COUNTER_KEY),
@@ -117,25 +130,27 @@ def push_status(app_name, message, level="idle"):
         "message": message,
         "level": level,
         # ts orders the merge against cn4m's own browser-side events; time is
-        # what actually gets shown.
+        # what the rail shows, datetime what the log page shows — a log that
+        # outlives the session needs the date to be honest about "when".
         "ts": time.time(),
-        "time": datetime.now().strftime("%H:%M"),
+        "time": now.strftime("%H:%M"),
+        "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
+    raw = json.dumps(entry)
     pipe = client.pipeline()
-    pipe.lpush(FEED_KEY, json.dumps(entry))
-    pipe.ltrim(FEED_KEY, 0, FEED_LIMIT - 1)
+    pipe.lpush(LOG_KEY, raw)
+    pipe.ltrim(LOG_KEY, 0, LOG_LIMIT - 1)
+    if feed:
+        pipe.lpush(FEED_KEY, raw)
+        pipe.ltrim(FEED_KEY, 0, FEED_LIMIT - 1)
     pipe.execute()
     return entry
 
 
-def read_status(since=0):
-    """
-    Entries newer than `since`, newest first. since=0 returns the whole feed,
-    which is what a freshly loaded page wants.
-    """
+def _read_list(key, limit, since):
     entries = []
-    for raw in _redis().lrange(FEED_KEY, 0, FEED_LIMIT - 1):
+    for raw in _redis().lrange(key, 0, limit - 1):
         try:
             entry = json.loads(raw)
         except ValueError:
@@ -143,3 +158,16 @@ def read_status(since=0):
         if entry.get("id", 0) > since:
             entries.append(entry)
     return entries
+
+
+def read_status(since=0):
+    """
+    Feed entries newer than `since`, newest first. since=0 returns the whole
+    feed, which is what a freshly loaded page wants.
+    """
+    return _read_list(FEED_KEY, FEED_LIMIT, since)
+
+
+def read_log(since=0):
+    """The log, newest first — same shape and same `since` cursor as the feed."""
+    return _read_list(LOG_KEY, LOG_LIMIT, since)

@@ -334,6 +334,88 @@ body {
 	color: #6a6a6a;
 }
 
+/* Footer of the tray: the way to the full log. Set off from the rows above by
+   a rule, and styled as a link rather than a row — it goes somewhere. */
+.obx-status-history-link {
+	display: block;
+	margin-top: 0.3rem;
+	padding: 0.45rem 0.7rem 0.15rem;
+	border-top: 1px solid #333333;
+	color: #7a7a7a;
+	text-decoration: none;
+	font-weight: 500;
+	line-height: 1.4;
+	transition-duration: 0.3s;
+}
+
+.obx-status-history-link:hover {
+	color: #F99D38;
+}
+
+
+/* ── Log page ─────────────────────────────────────────────────────────────────
+   /log — the full record behind the rail's tray, one line per entry with the
+   date. Reuses the tray's dot and app-tag styles so an entry looks the same in
+   both places; only the layout differs, since here a message may wrap. */
+
+.obx-log-header {
+	font-size: 0.7625em;
+}
+
+.obx-log-header a {
+	color: #7a7a7a;
+	text-decoration: none;
+	font-weight: 500;
+	transition-duration: 0.3s;
+}
+
+.obx-log-header a:hover {
+	color: #F99D38;
+}
+
+.obx-log-filter {
+	width: 240px;
+	max-width: 100%;
+}
+
+.obx-log-rows {
+	font-size: 0.7625em;
+	padding: 0.25rem 0;
+}
+
+.obx-log-row {
+	display: flex;
+	align-items: baseline;
+	gap: 0.55rem;
+	padding: 0.3rem 0.25rem;
+	color: #b0b0b0;
+	line-height: 1.4;
+	border-bottom: 1px solid #2a2a2a;
+}
+
+.obx-log-row:last-child {
+	border-bottom: none;
+}
+
+/* Baseline alignment would drop the dot below the text; nudge it up to sit
+   in the line the way it does in the rail. */
+.obx-log-row .obx-status-dot {
+	position: relative;
+	top: -1px;
+}
+
+.obx-log-time {
+	color: #6a6a6a;
+	flex: none;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.obx-log-message {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
 
 /* ── Rename dialog ────────────────────────────────────────────────────────────
    Hand-rolled rather than a Bootstrap modal: the vendored Bootstrap CSS styles
@@ -579,10 +661,13 @@ body {
 }
 
 /* Rows — darker than the #222 panel so the table reads as recessed, with
-   striping just strong enough to track across 16 columns */
+   striping just strong enough to track across 16 columns.
+   Fixed height, matching ROW_HEIGHT in cn4m.js: the virtual scroller's
+   arithmetic assumes every row is the same size, and this is what makes that
+   true before Tabulator has stamped its own height on the cells. */
 .tabulator-row {
 	background-color: #1b1b1b;
-	min-height: 20px;
+	height: 26px;
 	border-bottom: none;
 }
 

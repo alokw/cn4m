@@ -43,6 +43,12 @@ let browse_tables = { repo: null, quarantine: null };
 // starts a run records where its progress text should go.
 let transcode_progress_destination = "#review_asset_progress";
 
+// Every row in every table is exactly this tall — see the rowHeight option in
+// create_asset_table for why. Change it together with .tabulator-row in
+// cn4m.css, which sets the same figure so a row measures right before
+// Tabulator has stamped its height on.
+const ROW_HEIGHT = 26;
+
 // The internal keys stay repo/quarantine — they map straight onto the
 // *_repo_assets / *_quar_assets buckets in assets.json and the /assets/<bucket>
 // route. These are just what the user sees.
@@ -177,13 +183,28 @@ function paint_status_dot(dot, level) {
 // set_app_progress() below, which deliberately keeps no record.
 // level: "idle" (the default), "ok", "working", "warning", "blocked" or
 // "error" — it colours the dot. See LEVELS in app/suite_status.py.
-function set_app_status(text, level, app) {
+// options.local: keep it in this browser's history only. For lines that
+// describe a state rather than report an event — "12 assets waiting to be
+// tracked" on page load — which would otherwise be logged on every reload.
+function set_app_status(text, level, app, options) {
   app_progress_active = false;   // a task reporting an outcome has finished
   // Every message routed through here is an event worth keeping, so the log
   // fills itself — nothing that reports a status has to know it exists, and
   // anything added later is recorded for free. record_status() paints the rail
   // line from whatever ends up newest, this message included.
   record_status({ text: text || "", level: level || "idle", app: app || "", ts: Date.now() / 1000 });
+  // cn4m's own outcomes go to the server-side log as well, so the full log
+  // at /log has them alongside what the other tools pushed. Those arrive via
+  // the feed and are logged on the way in, so anything carrying an app tag
+  // has already been recorded and is not sent again.
+  if (!app && !(options && options.local)) log_own_status(text, level);
+}
+
+// Fire and forget: the rail has already been painted from local state, and a
+// log that didn't get one line is not worth an error in the user's face.
+function log_own_status(text, level) {
+  if (!text) return;
+  $.post('/log', { message: text, level: level || "idle" });
 }
 
 // True while a task is reporting progress, so the rail belongs to it until it
@@ -234,9 +255,10 @@ function render_status_line(entry) {
 // default: "what just happened?" is an occasional question, not worth permanent
 // space in a rail this size.
 //
-// Memory only, deliberately. A log that survived a reload would present
-// yesterday's activity as though it had just happened; the honest scope for this
-// is the session you're looking at.
+// Memory only, deliberately. A tray that survived a reload would present
+// yesterday's activity as though it had just happened; the honest scope for
+// this is the session you're looking at. The full record, with dates, is the
+// log page linked at the bottom of the tray — see start_log_page().
 
 const STATUS_HISTORY_LIMIT = 5;
 let status_history = [];   // newest first
@@ -279,11 +301,15 @@ function render_status_history() {
       + '<span class="obx-status-entry">' + escape_html(entry.text) + '</span>'
       + '</div>';
   });
-  $('#app-status-history').html(rows.length ? rows.join("")
-    : '<div class="obx-status-history-empty">No activity yet</div>');
-  // The caret is the only hint the tray is there, so it turns up once there's
-  // more to see than the line already on show.
-  $('#app-status-caret').toggle(status_history.length > 1);
+  // The way to the full log lives here rather than in the rail's links: it's
+  // not another tool, it's more of what the tray shows.
+  const footer = '<a class="obx-status-history-link" href="/log" target="_blank" rel="noopener">'
+    + 'full log &#8599;</a>';
+  $('#app-status-history').html((rows.length ? rows.join("")
+    : '<div class="obx-status-history-empty">No activity yet</div>') + footer);
+  // The caret is the only hint the tray is there. It used to wait for a second
+  // entry; now the log link means there is always something behind it.
+  $('#app-status-caret').show();
 }
 
 function toggle_status_history(show) {
@@ -312,18 +338,18 @@ function trigger_cascade_sync() {
   const button = $('#cascade-sync');
   if (button.prop('disabled')) return;      // a second click while one is in flight
   button.prop('disabled', true);
-  set_app_progress("Triggering cascade sync…");
 
+  // Nothing goes on the rail when this succeeds, on purpose. cn4m only knows
+  // that cascade accepted the request; what the job then does is cascade's to
+  // report, and it does so through /suite/status. A "sync triggered" line
+  // from this side would put cascade's name on a message cascade never sent,
+  // and would then sit beside the real one a moment later.
   $.post('/cascade/sync')
-    .done(function() {
-      // Only that cascade accepted it — the job runs over there on its own
-      // clock. If cascade pushes to /suite/status when it finishes, that turns
-      // up in this same rail a moment later.
-      set_app_status("Sync triggered", "ok", "cascade");
-    })
     .fail(function(xhr) {
+      // The one case cascade cannot report: it never got the request. That is
+      // cn4m's own failure, so it carries no app tag.
       const reason = (xhr.responseJSON && xhr.responseJSON.error) || "sync request failed";
-      set_app_status(reason, "error", "cascade");
+      set_app_status("Cascade sync: " + reason, "error");
     })
     .always(function() { button.prop('disabled', false); });
 }
@@ -371,7 +397,74 @@ function start_suite_status_polling() {
   setInterval(poll_suite_status, SUITE_STATUS_POLL_MS);
 }
 
+// ── Log page ──────────────────────────────────────────────────────────────────
+// /log — the full record behind the rail, with dates. Same entries as the
+// feed and the tray, without their caps: everything the suite tools pushed and
+// every outcome cn4m reported (see set_app_status), newest first, kept in
+// Redis for the last LOG_LIMIT lines. Polls for new lines the same way the
+// rail does, by id, so an open log page stays live.
+
+let log_last_id = 0;
+let log_entries = [];   // newest first, everything fetched so far
+let log_loaded = false;
+
+function start_log_page() {
+  $('#log-filter').on('input', render_log);
+  poll_log();
+  setInterval(poll_log, SUITE_STATUS_POLL_MS);
+}
+
+function poll_log() {
+  $.getJSON('/log/entries', { since: log_last_id })
+    .done(function(data) {
+      const entries = (data && data.entries) || [];
+      if (data && data.latest_id) log_last_id = data.latest_id;
+      if (!entries.length && log_loaded) return;   // nothing new
+      log_loaded = true;
+      log_entries = entries.concat(log_entries);
+      render_log();
+    })
+    .fail(function() {
+      $('#log-status').text("Could not reach the cn4m server");
+    });
+}
+
+// One text box narrows on app or message — case-insensitive "contains", the
+// same as the tables' text filters. Level isn't typed for; the dot shows it.
+function render_log() {
+  const needle = ($('#log-filter').val() || "").trim().toLowerCase();
+  const shown = needle
+    ? log_entries.filter(function(e) {
+        return (e.app || "").toLowerCase().indexOf(needle) !== -1
+          || (e.message || "").toLowerCase().indexOf(needle) !== -1;
+      })
+    : log_entries;
+
+  const rows = shown.map(function(entry) {
+    const level = STATUS_LEVEL_CLASS[entry.level] ? " " + STATUS_LEVEL_CLASS[entry.level] : "";
+    // Every line is tagged here, cn4m's included: unlike the rail there's no
+    // "the app you're looking at" to leave implicit in a log of the whole suite.
+    return '<div class="obx-log-row">'
+      + '<span class="obx-status-dot' + level + '"></span>'
+      + '<span class="obx-log-time">' + escape_html(entry.datetime || status_timestamp(entry.ts)) + '</span>'
+      + '<span class="obx-status-app">' + escape_html(entry.app || "") + '</span>'
+      + '<span class="obx-log-message">' + escape_html(entry.message || "") + '</span>'
+      + '</div>';
+  });
+
+  $('#log-rows').html(rows.length ? rows.join("")
+    : '<div class="obx-status-history-empty">'
+      + (needle ? "Nothing matches." : "No activity logged yet.") + '</div>');
+  $('#log-status').text(needle
+    ? shown.length + " of " + log_entries.length + " entries"
+    : log_entries.length + (log_entries.length === 1 ? " entry" : " entries"));
+}
+
 function wire_status_history() {
+  // Paint the tray once up front so the caret and the log link are there
+  // before anything has happened — otherwise the way to the log would only
+  // appear after the first event.
+  render_status_history();
   $('#app-status-toggle').click(function(e) {
     e.stopPropagation();          // don't trip the close-on-click-outside below
     toggle_status_history();
@@ -492,7 +585,8 @@ function update_progress(status_task, status_url) {
       msg_pending = "Starting Quarantine"
       msg_progress = "Quarantining Assets"
       msg_complete = "Quarantine Complete"
-      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete)
+      get_update_progress_feedback(status_task, status_url, msg_destination, msg_pending, msg_progress, msg_complete,
+        { complete: function(data) { set_app_status("Quarantined " + asset_count(data['total'] || 0), "ok"); } })
       break;
 
     case "track_assets":
@@ -1009,6 +1103,16 @@ function create_asset_table(element, options) {
     // flag and snaps the column back to whatever its longest value needs.
     layout: "fitDataStretch",
     maxHeight: "75vh",            // long lists scroll inside the table (virtual DOM)
+    // The virtual DOM only renders the rows in view and pads the table above
+    // and below with an ESTIMATE of the rest: the floored average height of
+    // the first window of rows, times the row count. Left to measure, rows
+    // come out a pixel apart (an icon here, none there; a fractional line
+    // height), and over 500+ rows the estimate drifts far enough from the
+    // truth to show — a scrollbar thumb that stops tracking, a band of empty
+    // space at the top or bottom. A fixed height makes the arithmetic exact.
+    // 26px: the natural height (0.78rem type × 1.5 line height + 3px padding
+    // each side ≈ 25px) with a pixel to spare for the 1em icons.
+    rowHeight: ROW_HEIGHT,
     placeholder: options.placeholder || "No assets found.",
     // Column widths/order and the sort survive a reload. Filters deliberately
     // do NOT — see reset_table_layout() and the note in TODO_TABULATOR.md.
@@ -1351,9 +1455,9 @@ function reveal_track_pane_if_pending() {
     if (count > 0) reveal_track_pane();
     // Seed the suite rail with something the per-pane progress lines don't say:
     // what is still sitting between approval and the Google Sheet.
-    if (count) set_app_status(asset_count(count) + " waiting to be tracked");
+    if (count) set_app_status(asset_count(count) + " waiting to be tracked", "idle", "", { local: true });
   }).fail(function() {
-    set_app_status("Could not reach the cn4m server", "error");
+    set_app_status("Could not reach the cn4m server", "error", "", { local: true });
   });
 }
 
@@ -1361,12 +1465,20 @@ function reveal_track_pane_if_pending() {
 // ── Ingest review table ───────────────────────────────────────────────────────
 
 // Build it on the first scan; refresh its data on every scan after that, which
-// keeps the user's column widths and filters.
+// keeps the user's column widths and header filters. The two flagged toggles
+// do NOT survive a scan: SHOW FLAGGED ONLY would otherwise carry over as a
+// filter on a table you haven't looked at yet, and SELECT ALL FLAGGED would
+// stay lit over a selection the new rows no longer hold.
 function render_asset_table(assets_by_id) {
   const rows = asset_rows(assets_by_id);
 
   if (asset_table) {
-    asset_table.replaceData(rows).then(update_qc_button);
+    if (qc_filter_active) set_qc_filter(false);
+    asset_table.replaceData(rows).then(function() {
+      asset_table.deselectRow();
+      update_qc_button();
+      update_selection_count();
+    });
     return;
   }
 
@@ -1390,7 +1502,7 @@ function render_asset_table(assets_by_id) {
   // filter-change stale in here. The event's second argument is the fresh set.
   asset_table.on("dataFiltered", (filters, rows) => {
     update_selection_count(rows);
-    update_flagged_select_button();
+    update_flagged_select_button(rows);
   });
 }
 
@@ -1415,16 +1527,18 @@ function set_qc_filter(active) {
 
 // Flagged rows currently passing the filters. Scoped to "active" to match the
 // header select-all, so we never touch a row the user can't see.
-function flagged_rows_in_view() {
+// active_rows may be supplied by a caller that has a fresher set than the
+// table — see the dataFiltered handler in render_asset_table.
+function flagged_rows_in_view(active_rows) {
   if (!asset_table) return [];
-  return asset_table.getRows("active").filter(row => row.getData().qc_fail);
+  return (active_rows || asset_table.getRows("active")).filter(row => row.getData().qc_fail);
 }
 
 // True when every visible flagged row is already selected — this drives the
 // toggle's direction, so manually unticking one flags the button back to
 // "select" rather than leaving it out of step with the table.
-function all_flagged_selected() {
-  const flagged = flagged_rows_in_view();
+function all_flagged_selected(active_rows) {
+  const flagged = flagged_rows_in_view(active_rows);
   if (!flagged.length) return false;
   const selected = new Set(asset_table.getSelectedRows());
   return flagged.every(row => selected.has(row));
@@ -1443,8 +1557,8 @@ function select_all_flagged() {
 
 // Matches SHOW FLAGGED ONLY: the label stays put and the orange highlight
 // carries the state, so both toggles read the same way.
-function update_flagged_select_button() {
-  $('#select-flagged').toggleClass('obx-button-active', all_flagged_selected());
+function update_flagged_select_button(active_rows) {
+  $('#select-flagged').toggleClass('obx-button-active', all_flagged_selected(active_rows));
 }
 
 // The filter button's label carries the count, so a finished scan reports its QC
@@ -1468,7 +1582,7 @@ function update_qc_button() {
   if (!failing) {
     if (qc_filter_active) set_qc_filter(false);  // don't leave an empty table behind
     filter_button.text("NO FLAGGED ASSETS").prop("disabled", true);
-    select_button.prop("disabled", true);
+    select_button.prop("disabled", true).removeClass('obx-button-active');
     return;
   }
 
@@ -1623,11 +1737,18 @@ function get_selected_assets() {
   return asset_table.getSelectedData().map(row => row.fileid);
 }
 
-// Remove rows from the table by fileid after approve/quarantine
+// Remove rows from the table by fileid after approve/quarantine.
+// Tabulator drops a deleted row from the selection without firing
+// rowSelectionChanged, so nothing downstream hears about it: after "select all
+// flagged" then APPROVE, the button would stay lit and the count would still
+// read "12 selected" with no rows left. Refresh both here.
 function remove_assets_from_table(assets) {
+  if (!asset_table) return;
   for (const asset of assets) {
-    if (asset_table && asset_table.getRow(asset)) asset_table.deleteRow(asset);
+    if (asset_table.getRow(asset)) asset_table.deleteRow(asset);
   }
+  update_selection_count();
+  update_qc_button();
 }
 
 // POST to a URL with no payload; used for check_assets, track_assets, clear_flags

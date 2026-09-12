@@ -1,0 +1,47 @@
+<html>
+<head>
+    <title>outbox cn4m — log</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <script src="{{ url_for('static', filename='jquery2.1.3.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='cn4m.js') }}"></script>
+
+    <link href="{{ url_for('static', filename='bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='cn4m.css') }}" rel="stylesheet">
+
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='logos/apple-touch-icon.png') }}">
+	<link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='logos/favicon-32x32.png') }}">
+	<link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='logos/favicon-16x16.png') }}">
+</head>
+<body>
+
+	<!-- The full log behind the rail's status tray: every line the suite tools
+	     pushed to /suite/status and every outcome cn4m reported, with dates.
+	     Opened from the "full log" link at the bottom of the tray; the rows are
+	     rendered and kept live by start_log_page() in cn4m.js. -->
+
+	<div class="container p-3 d-flex justify-content-between align-items-center">
+		<a href="/" title="Back to cn4m"><img src="{{ url_for('static', filename='logos/cn4m_logo_white_v1_64px.png') }}"></a>
+		<div class="obx-log-header text-end">
+			<a href="/">&#8592; back to cn4m</a>
+		</div>
+	</div>
+
+	<div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
+		<div class="d-flex justify-content-between align-items-center flex-wrap pb-2" style="gap:0.5rem;">
+			<div class="text-uppercase fw-semibold obx-orange">log</div>
+			<div class="d-flex align-items-center" style="gap:0.75rem;">
+				<span class="fw-lighter fs-7" id="log-status"></span>
+				<input id="log-filter" class="obx-input obx-log-filter" type="text" placeholder="filter by app or message"
+				       spellcheck="false" autocomplete="off" autocapitalize="off">
+			</div>
+		</div>
+		<div class="obx-log-rows" id="log-rows"></div>
+	</div>
+
+<script>
+$(start_log_page);
+</script>
+</body>
+</html>

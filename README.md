@@ -68,6 +68,8 @@ A thin rail across the top of the cn4m UI links to the other tools, marking cn4m
 
 The right of that rail is a status line, reporting what cn4m has just done (`Discovered 12 new assets`, `Approved 5 assets`, `12 assets pushed to the Google Sheet`) alongside anything the other tools have pushed to it. A scan or a transcode shows its percentage there while it runs (`45% · Transcoding 1000_test_v1.mov`), then the outcome. Click it for the last five entries with timestamps, the other tools' messages tagged with their name; click anywhere else or press Esc to close. Progress ticks are not kept — only outcomes — so the five slots aren't flushed by one long scan. The history is per-session and lives only in the browser, so a reload starts it fresh rather than presenting yesterday's activity as though it had just happened.
 
+For more than the last five, the **full log** link at the bottom of that tray opens [`/log`](#the-log) in a new tab: the same entries with full dates, going back much further.
+
 Publishing 2642 at all is only so you can inspect Redis from the host — the worker reaches it over the Docker network either way, and you can drop that mapping without affecting anything.
 
 ### Suite status feed
@@ -123,9 +125,17 @@ Returns `201` with the stored entry, `400` if `app` or `message` is missing, `40
 
 `GET /suite/status` returns the feed, newest first, as `{"entries": [...], "latest_id": N}`. Pass `?since=<id>` for only what has arrived since — that's how the UI polls (every 10 seconds), so a message is never shown twice and a slow poll just catches up.
 
-The feed lives in Redis, capped at the last 20 entries: it survives a page reload and a Flask restart, and every open browser sees the same thing. It is **activity, not a log** — nothing here is archived, and anything worth keeping belongs in the Google Sheet.
+The feed lives in Redis, capped at the last 20 entries: it survives a page reload and a Flask restart, and every open browser sees the same thing. It is **activity, not an archive** — the last 2,000 lines are kept in [the log](#the-log), and anything worth keeping longer than that belongs in the Google Sheet.
 
 **Security.** The endpoint is open by default, like the rest of cn4m, which assumes a trusted LAN. Setting `SUITE_STATUS_TOKEN` in `.env` requires callers to send it as an `X-CN4M-Token` header (or a `token` field) — worth doing the moment anything outside that LAN can reach port 2640, since this endpoint writes text that everyone's UI displays.
+
+### The log
+
+`/log` — linked as **full log** from the bottom of the rail's status tray — is the full record behind the rail: every line the other tools have pushed to the feed, plus every outcome cn4m itself has reported there (`Discovered 12 new assets`, `Approved 5 assets`, `Quarantined 2 assets`, `12 assets pushed to the Google Sheet`, `Transcoded 3 assets`, and any failure to reach cascade). Newest first, each line with its date and time, its level as the same coloured dot the rail uses, and every line tagged with the app it came from — cn4m's own included, since this is a log of the whole suite rather than a view from inside one tool. A text box filters on app or message, and an open log page stays live, polling for new lines the same way the rail does.
+
+It lives in Redis alongside the feed, capped at the last 2,000 lines, so it survives reloads and restarts and every browser sees the same log. Progress ticks are never logged, only outcomes — the same rule as the tray — and neither is the `N assets waiting to be tracked` line the rail shows on load, which describes a state rather than reports an event and would otherwise be logged on every reload.
+
+`GET /log/entries` returns it as JSON in the same shape as the feed (`{"entries": [...], "latest_id": N}`, `?since=<id>` supported, and the ids are shared with the feed). `POST /log` with `message` and optional `level` is how the UI records cn4m's own outcomes; it takes no token and pins the app name to `cn4m`, so the most it can be used for is a cn4m-tagged line in the log — it never writes to the rail.
 
 ### Triggering a cascade sync
 
@@ -142,7 +152,7 @@ Leave `CASCADE_SYNC_URL` unset and no button appears, so an install that doesn't
 
 The request is made by cn4m rather than by the browser, deliberately: the hook needs a bearer token, and a token the page can read is a token anyone with the page can read. Nothing about the target reaches the frontend — it only learns whether a button should exist.
 
-Pressing it reports that cascade *accepted* the request; the job then runs on cascade's own clock. If cascade posts to [the suite status feed](#suite-status-feed) when it finishes, that turns up in the same rail a moment later.
+Pressing it says nothing in the rail on success, deliberately: cn4m only knows that cascade *accepted* the request, and the job then runs on cascade's own clock. Everything about the sync itself — started, finished, failed — is cascade's to report, by posting to [the suite status feed](#suite-status-feed), and that is what appears in the rail, tagged `cascade`. The one thing cn4m reports on its own behalf is failing to reach cascade at all (`Cascade sync: could not reach cascade: Connection refused`), since a request that never arrived is not something cascade can tell you about.
 
 **Upgrading from an earlier version?** The web GUI moved from 5000 to 2640 and Flower from 5555 to 2641, so `docker compose up -d` is required to republish the ports (a plain `restart` keeps the old mapping). Update any bookmarks.
 
@@ -347,7 +357,7 @@ Numeric columns accept operators, so you can type:
 - **SHOW FLAGGED ONLY (n)** — narrows the table to flagged assets. The count tells you how many the scan found without your having to click. Combines with the column filters rather than replacing them.
 - **SELECT ALL FLAGGED** — selects the flagged rows in place, ready for QUARANTINE or TRANSCODE.
 
-Both turn orange while active, and both disappear if no QC rules are configured in `.env`.
+Both turn orange while active, and both disappear if no QC rules are configured in `.env`. Both also reset on every scan — unlike the column filters, which carry over — so a new set of results always comes up unfiltered with nothing selected.
 
 ### Version conflicts
 
@@ -413,7 +423,7 @@ cn4m runs as four Docker services:
 | `redis` | Message broker between Flask and Celery |
 | `flower` | Celery task monitoring dashboard (http://localhost:2641) |
 
-**The frontend** is a single page with no build step: jQuery, Bootstrap and Tabulator 6.5.2 are vendored as plain files in `app/static/`. `cn4m.js` polls the task status endpoint and owns the asset tables — column definitions, QC formatting, filters and selection. All three tables (review, repo, quarantine) are built by one `create_asset_table()` factory, differing only in whether rows are selectable and whether the TRACKED column is shown.
+**The frontend** is two pages with no build step: jQuery, Bootstrap and Tabulator 6.5.2 are vendored as plain files in `app/static/`. `cn4m.js` polls the task status endpoint and owns the asset tables — column definitions, QC formatting, filters and selection. All three tables (review, repo, quarantine) are built by one `create_asset_table()` factory, differing only in whether rows are selectable and whether the TRACKED column is shown. Rows are a fixed height (`ROW_HEIGHT`, mirrored in `cn4m.css`) because Tabulator's virtual scroller estimates the unrendered rows from an average, and on long lists a per-row variance of a pixel is enough to leave the scrollbar out of step with the table. The second page, `/log` ([log.html](app/templates/log.html)), loads the same `cn4m.js` and calls only its log-page functions.
 
 Two read-only endpoints back the browse tabs: `GET /assets/repo` and `GET /assets/quarantine` merge the tracked and untracked buckets and stamp each asset with `tracked`. `GET /untracked_count` reports how many assets are still waiting to be pushed to the sheet. These read `assets.json` directly rather than going through Celery, so **the `web` service mounts your workspace folder too** — read-only, since every mutation happens in the worker. If you add these routes to an existing deployment, `docker compose up -d` is required (a plain `restart` won't pick up a new volume).
 
