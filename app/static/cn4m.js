@@ -162,11 +162,12 @@ function asset_count(n, adjective) {
 // isn't listed. Keep in step with LEVELS in app/suite_status.py, which decides
 // what the feed will accept.
 const STATUS_LEVEL_CLASS = {
-  ok:      "obx-status-ok",
-  working: "obx-status-working",
-  warning: "obx-status-warning",
-  blocked: "obx-status-blocked",
-  error:   "obx-status-error",
+  ok:       "obx-status-ok",
+  working:  "obx-status-working",
+  progress: "obx-status-working",   // a live line; same colour as working
+  warning:  "obx-status-warning",
+  blocked:  "obx-status-blocked",
+  error:    "obx-status-error",
 };
 
 const STATUS_LEVEL_CLASSES = Object.values(STATUS_LEVEL_CLASS).join(" ");
@@ -242,7 +243,7 @@ function set_app_progress(text, level) {
 function render_status_line(entry) {
   if (!entry) return;
   paint_status_dot($('#app-status-dot'), entry.level);
-  $('#app-status-time').text(status_timestamp(entry.ts));
+  $('#app-status-time').text(entry.ts === null ? "" : status_timestamp(entry.ts));
   $('#app-status-app').text(entry.app || "").toggle(!!entry.app);
   $('#app-status-text')
     .text(entry.text)
@@ -363,38 +364,69 @@ function trigger_cascade_sync() {
 //
 // Entries are requested by id (?since=), not by time, so a message can never be
 // shown twice and a slow poll simply catches up.
+//
+// The exception is a live progress line ("Sync in progress: 16%, 289 MB/s"),
+// which an app replaces every second or so. Those come back with every poll
+// as `progress`, are painted but never recorded — the suite-side twin of
+// set_app_progress() — and while one is live the poll tightens to two
+// seconds, since a percentage that moves every ten isn't much of a percentage.
 
 const SUITE_STATUS_POLL_MS = 10000;
+const SUITE_PROGRESS_POLL_MS = 2000;
 let suite_status_last_id = 0;
+
+// The most recently updated live progress line from anywhere in the suite, or
+// null. Painted on the rail whenever cn4m's own task isn't holding it.
+let suite_progress = null;
 
 function poll_suite_status() {
   $.getJSON('/suite/status', { since: suite_status_last_id })
     .done(function(data) {
       const entries = (data && data.entries) || [];
       if (data && data.latest_id) suite_status_last_id = data.latest_id;
-      if (!entries.length) return;
 
-      record_status.apply(null, entries.map(function(entry) {
-        return {
-          text: entry.message || "",
-          app: entry.app || "",
-          level: entry.level || "idle",
-          ts: entry.ts || (Date.now() / 1000),
-        };
-      }));
+      if (entries.length) {
+        record_status.apply(null, entries.map(function(entry) {
+          return {
+            text: entry.message || "",
+            app: entry.app || "",
+            level: entry.level || "idle",
+            ts: entry.ts || (Date.now() / 1000),
+          };
+        }));
+        // No painting for these: record_status() has already put whichever
+        // entry is newest on the rail, so a suite message can't bury cn4m's
+        // own last word just by arriving later than it happened.
+      }
 
-      // No painting here: record_status() has already put whichever entry is
-      // newest on the rail, so a suite message can't bury cn4m's own last word
-      // just by arriving later than it happened.
+      const live = ((data && data.progress) || [])[0];
+      const had_progress = !!suite_progress;
+      suite_progress = live
+        ? { text: live.message || "", app: live.app || "", level: "progress", ts: live.ts }
+        : null;
+      if (app_progress_active) return;   // cn4m's own running task holds the rail
+      // A live line outranks the history while it's live — it's what is
+      // happening now, and the outcome it's building up to will land in the
+      // tray when it comes.
+      if (suite_progress) {
+        render_status_line(suite_progress);
+      } else if (had_progress && !entries.length) {
+        // It went away without an outcome (the tool stopped updating and the
+        // server timed it out). Nothing new was recorded to repaint over it,
+        // so fall back to the last thing that did happen.
+        render_status_line(status_history[0] || { text: "Ready", level: "idle", ts: null, app: "" });
+      }
+    })
+    // A failed poll is deliberately silent: the feed is a nicety, and turning
+    // the rail red because another tool's message didn't arrive would be
+    // worse than saying nothing.
+    .always(function() {
+      setTimeout(poll_suite_status, suite_progress ? SUITE_PROGRESS_POLL_MS : SUITE_STATUS_POLL_MS);
     });
-  // A failed poll is deliberately silent: the feed is a nicety, and turning the
-  // rail red because another tool's message didn't arrive would be worse than
-  // saying nothing.
 }
 
 function start_suite_status_polling() {
-  poll_suite_status();
-  setInterval(poll_suite_status, SUITE_STATUS_POLL_MS);
+  poll_suite_status();   // re-arms itself; the interval depends on what came back
 }
 
 // ── Log page ──────────────────────────────────────────────────────────────────

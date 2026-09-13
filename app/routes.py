@@ -8,7 +8,7 @@ from app.tasks import *
 from app import celery
 from app.helpers import (get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions,
                          parse_qc_fps, get_json_file, ASSETS_JSON)
-from app.suite_status import push_status, read_status, read_log
+from app.suite_status import push_status, read_status, read_log, read_progress
 import os
 import requests
 
@@ -167,6 +167,10 @@ def get_suite_status():
     """
     The feed, newest first. Pass ?since=<id> to get only what's arrived since —
     the UI polls this way so a message is never shown twice.
+
+    "progress" is the live lines, every poll regardless of since: they have no
+    ids because they are not events, just whatever each app last said about a
+    run still going. Empty when nothing is in progress.
     """
     try:
         since = int(request.args.get('since', 0))
@@ -175,7 +179,7 @@ def get_suite_status():
 
     entries = read_status(since)
     latest = entries[0]["id"] if entries else since
-    return jsonify({"entries": entries, "latest_id": latest})
+    return jsonify({"entries": entries, "latest_id": latest, "progress": read_progress()})
 
 
 @main.route('/suite/status', methods=['POST'])
@@ -185,7 +189,8 @@ def post_suite_status():
       app      required — which tool it came from, shown as a prefix
       message  required — one short line; longer than 160 chars is trimmed
       level    optional — idle (default) | ok | working | warning | blocked |
-                          error, colours the dot
+                          error, colours the dot; progress is a live line that
+                          replaces the app's previous one (see suite_status.py)
     """
     if not _suite_token_ok():
         return jsonify({"error": "invalid or missing token"}), 403

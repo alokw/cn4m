@@ -28,6 +28,14 @@ COUNTER_KEY = "cn4m:suite:status:id"
 FEED_LIMIT = 20
 LOG_LIMIT = 2000
 
+# Live progress lines, one per app, in a hash keyed by app name. Not a list:
+# a progress line replaces the last one from the same app rather than joining
+# a history, which is the whole point of the level. An app that stops
+# updating (crashed mid-sync) must not leave "16%" on the rail for good, so
+# anything older than PROGRESS_TTL is dropped on read.
+PROGRESS_KEY = "cn4m:suite:progress"
+PROGRESS_TTL = 120
+
 # A status line has to fit a narrow rail; anything longer is truncated rather
 # than rejected, so a chatty caller still gets seen instead of silently failing.
 MESSAGE_LIMIT = 160
@@ -51,6 +59,13 @@ APP_LIMIT = 32
 #                      running. Actionable now, unlike warning — a destination
 #                      is unreachable and the run is awaiting a decision.
 #   error     red      Finished badly, or could not run at all.
+#   progress  orange   A live line — "Sync in progress: 16%, 289 MB/s" — that
+#                      the app will keep replacing. Painted on the rail like
+#                      working, but never recorded: it goes into neither the
+#                      feed, the tray nor the log, and the app's next
+#                      non-progress post (or two minutes of silence) clears
+#                      it. For anything sent every second. A one-off "started"
+#                      is working, not progress.
 #
 # warning and blocked are the pair worth getting right, and they split on two
 # questions: is the run over, and does someone have to do something?
@@ -66,7 +81,7 @@ APP_LIMIT = 32
 # then falls back to idle if it still doesn't match: a typo costs a colour,
 # never a message. Nothing is reported back to the caller, so a line turning up
 # grey is the only symptom.
-LEVELS = ("idle", "working", "ok", "warning", "blocked", "error")
+LEVELS = ("idle", "working", "ok", "warning", "blocked", "error", "progress")
 
 _client = None
 
@@ -119,10 +134,25 @@ def push_status(app_name, message, level="idle", feed=True):
     feed=False is for cn4m's own outcomes, which the browser has already put on
     its rail: they are worth keeping in the log, but re-broadcasting them
     through the feed would paint them twice.
+
+    A "progress" level goes nowhere near the lists: it overwrites the app's
+    slot in the progress hash and that is all. Any other level clears that
+    slot — the outcome has arrived, so the live line is done.
     """
     app_name, message, level = clean_entry(app_name, message, level)
     client = _redis()
     now = datetime.now()
+
+    if level == "progress":
+        entry = {
+            "app": app_name,
+            "message": message,
+            "level": level,
+            "ts": time.time(),
+            "time": now.strftime("%H:%M"),
+        }
+        client.hset(PROGRESS_KEY, app_name, json.dumps(entry))
+        return entry
 
     entry = {
         "id": client.incr(COUNTER_KEY),
@@ -139,6 +169,7 @@ def push_status(app_name, message, level="idle", feed=True):
 
     raw = json.dumps(entry)
     pipe = client.pipeline()
+    pipe.hdel(PROGRESS_KEY, app_name)
     pipe.lpush(LOG_KEY, raw)
     pipe.ltrim(LOG_KEY, 0, LOG_LIMIT - 1)
     if feed:
@@ -171,3 +202,29 @@ def read_status(since=0):
 def read_log(since=0):
     """The log, newest first — same shape and same `since` cursor as the feed."""
     return _read_list(LOG_KEY, LOG_LIMIT, since)
+
+
+def read_progress():
+    """
+    Every app's live progress line, most recently updated first. Lines older
+    than PROGRESS_TTL are dropped here rather than by a Redis expiry because a
+    hash can't expire one field at a time, and one key is simpler than one
+    per app.
+    """
+    client = _redis()
+    cutoff = time.time() - PROGRESS_TTL
+    live, stale = [], []
+    for app_name, raw in client.hgetall(PROGRESS_KEY).items():
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            stale.append(app_name)
+            continue
+        if entry.get("ts", 0) < cutoff:
+            stale.append(app_name)
+        else:
+            live.append(entry)
+    if stale:
+        client.hdel(PROGRESS_KEY, *stale)
+    live.sort(key=lambda entry: entry["ts"], reverse=True)
+    return live

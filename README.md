@@ -93,7 +93,7 @@ curl -X POST http://<cn4m-host>:2640/suite/status \
 |---|---|---|
 | `app` | required | Which tool it came from. Shown as an orange prefix, so keep it to the tool's name. |
 | `message` | required | One short line. Whitespace is collapsed; anything past 160 characters is trimmed with an ellipsis rather than rejected. |
-| `level` | optional | `idle` (default), `ok`, `working`, `warning`, `blocked` or `error` — colours the status dot. Matched case-insensitively; an unrecognised value falls back to `idle` rather than failing the request, so a message is never lost to a bad level. |
+| `level` | optional | `idle` (default), `ok`, `working`, `warning`, `blocked` or `error` — colours the status dot — or `progress`, a live line that replaces the app's previous one (see below). Matched case-insensitively; an unrecognised value falls back to `idle` rather than failing the request, so a message is never lost to a bad level. |
 
 #### Levels
 
@@ -105,6 +105,7 @@ curl -X POST http://<cn4m-host>:2640/suite/status \
 | `warning` | yellow | Finished, but not cleanly. Nothing is broken and nobody must act now, but it shouldn't read as green — a run that completed partially, say one destination skipped because a NAS was off. |
 | `blocked` | purple | Not finished: waiting on a person, with a timeout running. Actionable now, unlike `warning` — a destination is unreachable and the run is awaiting a decision. |
 | `error` | red | Finished badly, or couldn't run at all. |
+| `progress` | orange | A live line the app keeps replacing — `Sync in progress: 16%, 289 MB/s`. Painted like `working`, but not an event: see [Progress lines](#progress-lines). |
 
 The distinction that matters most is `warning` against `blocked`. A `warning` is
 historical — the run is over and this is the record of how it went. A `blocked`
@@ -123,7 +124,18 @@ curl -X POST http://<cn4m-host>:2640/suite/status \
 
 Returns `201` with the stored entry, `400` if `app` or `message` is missing, `403` if a token is required and wrong, `503` if Redis is unreachable.
 
-`GET /suite/status` returns the feed, newest first, as `{"entries": [...], "latest_id": N}`. Pass `?since=<id>` for only what has arrived since — that's how the UI polls (every 10 seconds), so a message is never shown twice and a slow poll just catches up.
+#### Progress lines
+
+Every other level is an event: it joins the feed, the tray and the log. Something reporting a percentage every second is not an event, it's one line that keeps changing, and sending it as `working` fills all three with `16%`, `17%`, `18%`. Send it as `progress` instead:
+
+```
+curl -X POST http://<cn4m-host>:2640/suite/status \
+     -d app=cascade -d message="Sync in progress: 16%, 289 MB/s" -d level=progress
+```
+
+A `progress` line **replaces** the app's previous one rather than being added — there is exactly one per app — and is painted on the rail with the working orange but recorded nowhere: not in the tray, not in the feed, not in the log. Put whatever is changing in the message; cn4m doesn't parse it, it just shows the latest. It's cleared by the app's next non-`progress` post, which is the outcome taking its place (`Synced 40 links`, `level=ok`), or after two minutes without an update, so a tool that dies mid-run doesn't leave its last percentage on the rail. While any progress line is live the UI polls every 2 seconds rather than 10, so it reads as live rather than as a slideshow. A one-off "starting" line is a `working` event, not `progress`.
+
+`GET /suite/status` returns the feed, newest first, as `{"entries": [...], "latest_id": N, "progress": [...]}`. Pass `?since=<id>` for only what has arrived since — that's how the UI polls (every 10 seconds, or every 2 while something is in progress), so a message is never shown twice and a slow poll just catches up. `progress` is every app's live line, most recently updated first, returned on every poll regardless of `since`; the lines have no ids because they aren't events.
 
 The feed lives in Redis, capped at the last 20 entries: it survives a page reload and a Flask restart, and every open browser sees the same thing. It is **activity, not an archive** — the last 2,000 lines are kept in [the log](#the-log), and anything worth keeping longer than that belongs in the Google Sheet.
 
