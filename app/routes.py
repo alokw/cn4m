@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, render_template, url_for, request
 from app.tasks import *
 from app import celery
 from app.helpers import (get_ffmpeg_presets, parse_qc_codecs, parse_qc_resolutions,
-                         parse_qc_fps, get_json_file, ASSETS_JSON)
+                         parse_qc_fps, get_json_file, asset_relpath, ASSETS_JSON)
 from app.suite_status import push_status, read_status, read_log, read_progress
 import os
 import requests
@@ -65,8 +65,32 @@ def browse_assets(bucket):
             # hold a None where an asset went missing mid-operation.
             if not asset:
                 continue
-            result[fileid] = dict(asset, tracked=tracked)
+            # relpath resolves where the file actually is — a quarantined
+            # asset's stored folder is where it was delivered, not where it
+            # went. The review table derives its own (everything there is
+            # still in the repo at folder/name); see asset_rows in cn4m.js.
+            result[fileid] = dict(asset, tracked=tracked, relpath=asset_relpath(asset, key))
     return jsonify(result)
+
+
+@main.route('/open_config', methods=['GET'])
+def open_config():
+    """
+    Where else the workspace can be reached from, for the tables' right-click
+    menu — all three optional, all from .env, each unlocking its own menu
+    items when set. See "Opening assets in a player" in the README.
+      files_url      the files server (tools/files-server) — "Open in IINA/mpv",
+                     "Preview" and "Copy URL"
+      share_windows  the workspace as a UNC path — "Copy path" on Windows
+      share_mac      the workspace as mounted on a Mac — "Copy path" there
+    """
+    def env(name):
+        return (os.getenv(name) or "").strip().strip("'\"").rstrip("/\\")
+    return jsonify({
+        "files_url": env("FILES_URL"),
+        "share_windows": env("SHARE_PATH_WINDOWS"),
+        "share_mac": env("SHARE_PATH_MAC"),
+    })
 
 
 @main.route('/untracked_count', methods=['GET'])

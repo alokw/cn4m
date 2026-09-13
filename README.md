@@ -60,6 +60,7 @@ The suite reserves the **264x** range so every tool can run side by side on one 
 | 2645 | cn4m-inbound | |
 | 2646 | cn4m-smartsync | |
 | 2647 | cn4m-symmetry | |
+| 2648 | cn4m files server (Caddy, on the host — see [Opening assets in a player](#opening-assets-in-a-player)) | ✔ |
 | 2649 | cn4m-cascade | |
 
 Only the first three are configured here, in [docker-compose.yaml](docker-compose.yaml). 2640 is ours end to end — it's the port Flask itself listens on. 2641 and 2642 are host-side mappings onto the stock ports inside the Flower and Redis images (5555 and 6379), which are left alone: the containers talk to each other over the Docker network, so `CELERY_BROKER_URL=redis://redis:6379/0` names the *container* port and is deliberately unchanged.
@@ -190,6 +191,9 @@ All settings live in the `.env` file in the project root (copy `.env.example` to
 | `CASCADE_SYNC_URL` | | cn4m-cascade job hook fired by the rail's **sync** button. Unset means no button — see [Triggering a cascade sync](#triggering-a-cascade-sync). |
 | `CASCADE_SYNC_TOKEN` | | Bearer token for that hook. Omit if it needs none. |
 | `SUITE_STATUS_TOKEN` | | Shared secret for the suite status feed (`POST /suite/status`). Unset means the endpoint is open — see [Suite status feed](#suite-status-feed). |
+| `FILES_URL` | | The files server, e.g. `http://10.10.20.10:2648`. Unlocks **Open in IINA / mpv**, **Preview** and **Copy URL** on the right-click menu — see [Opening assets in a player](#opening-assets-in-a-player). |
+| `SHARE_PATH_WINDOWS` | | The workspace as a UNC path, e.g. `\\10.10.20.10\specs26`. Unlocks **Copy path** for Windows users. |
+| `SHARE_PATH_MAC` | | The workspace as mounted on a Mac, e.g. `/Volumes/specs26`. Unlocks **Copy path** for Mac users. |
 | `SECRET_KEY` | | Random string for Flask session security. Generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
 
 `CELERY_BROKER_URL` and `RESULT_BACKEND` are set automatically by docker-compose and don't need to be configured.
@@ -360,7 +364,7 @@ Numeric columns accept operators, so you can type:
 
 **Duration filters in seconds and Size filters in MiB** (the units are shown in each box), even though the columns display a timecode and a human-readable size. Files with no value for a column — an audio stem has no width — are excluded whenever that column is filtered.
 
-**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout. On the NEW tab the same menu offers **Rename…** — see [Renaming](#renaming).
+**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout. On the NEW tab the same menu offers **Rename…** — see [Renaming](#renaming). With a files server configured it also opens the file in a player, previews it, or copies its address — see [Opening assets in a player](#opening-assets-in-a-player).
 
 ### Flagged assets
 
@@ -421,6 +425,39 @@ Drag a column's edge to resize it, including narrower than its contents — long
 Filters are deliberately **not** remembered, so a new scan always opens showing everything.
 
 To get back to the defaults, right-click any cell and choose **Reset column layout**. Double-clicking a column's edge re-fits just that column to its contents.
+
+### Opening assets in a player
+
+QC means looking at the original, not a proxy — so cn4m transcodes nothing for viewing. Instead it knows each asset's address in two forms and hands it to whatever can play it. Right-click any row on any of the three tables:
+
+| Item | What it does | Needs |
+|---|---|---|
+| **Open in IINA** (Mac) / **Open in mpv** (Windows, Linux) | Opens the original in the player, streamed off the files server. The browser asks *"Open IINA?"* the first time; tick *always allow* and it's one click from then on. | `FILES_URL`, and the player set up on the workstation (below) |
+| **Preview** | Plays it in a dialog in the browser. Only offered for what a browser can play natively — an H.264 mp4, a png, a wav — so a ProRes or NotchLC `.mov` doesn't get one; that's what the player is for. Esc or click outside to close. | `FILES_URL` |
+| **Copy URL** | Copies the HTTP address, for pasting into VLC's *Open Network*, Resolve, a message… | `FILES_URL` |
+| **Copy path** | Copies the file's path on the SMB share, in the form your OS wants — `\\10.10.20.10\specs26\repo\…` on Windows, `/Volumes/specs26/repo/…` on a Mac — for any player that opens files rather than URLs. | `SHARE_PATH_WINDOWS` / `SHARE_PATH_MAC` |
+
+Each item appears only when its setting is present, so an install without a files server simply has a shorter menu.
+
+**On the cn4m host**, run the files server: [tools/files-server](tools/files-server/) is a single `caddy.exe` serving the workspace read-only over HTTP. `get-caddy.bat` fetches it once; `serve.bat` runs it in a console window until Ctrl+C. Nothing installs or auto-starts — if you want it up at boot, that's your Task Scheduler entry to make. Set `FILES_URL` to where it's listening. It runs on the host rather than in Docker on purpose: reads through Docker Desktop's bind mount top out around 200 MB/s, one ProRes 4K stream's worth; native reads do 10GbE line rate. Serving is a `sendfile` — no decode, no transcode — so a couple of users pulling 80 GB originals costs the host almost nothing.
+
+**On each workstation**, once:
+
+- **Mac** — install [IINA](https://iina.io/). That's it: IINA registers the `iina://` link cn4m uses out of the box.
+- **Windows** — two zips, nothing to install:
+  1. [mpv](https://mpv.io/installation/) — the Windows build. Unzip somewhere permanent, e.g. `C:\Tools\mpv\`.
+  2. [mpv-handler](https://github.com/akiirui/mpv-handler/releases) — `mpv-handler-windows-amd64.zip`. Unzip to e.g. `C:\Tools\mpv-handler\`, run `handler-install.bat` (this registers the `mpv-handler://` link — the part the browser needs), then edit its `config.toml` and point it at mpv, backslashes doubled: `mpv = "C:\\Tools\\mpv\\mpv.com"`. Leave `ytdl` out; it's for YouTube-style sites.
+
+  3. Back in cn4m, right-click any cell of the asset's row in the NEW, APPROVED or QUARANTINED table (the same menu that has *Filter by* and *Rename…*) → **Open in mpv**. The browser asks *"Open mpv-handler?"* — tick **Always allow** and it's one click from then on.
+
+  Don't move either folder afterwards — the registration and the config both hold absolute paths.
+- **Linux** — mpv from your package manager and mpv-handler from the AUR or its release page; same `config.toml`.
+
+If **Open in…** appears to do nothing, the handler isn't registered on that machine — the browser has no way to tell the page, so the status rail says as much after each attempt. If the *"Open mpv-handler?"* prompt does appear but nothing plays, the mpv path in `config.toml` is wrong. **Copy path** and **Copy URL** work regardless.
+
+Why URL schemes, and why HTTP: a web page cannot launch a local program with a file path — browsers refuse `file://` and `smb://` links from web pages for good reason. What it *can* do is hand a URL to an app that has registered a scheme for it, which is what IINA and mpv-handler provide, and both accept only http URLs — hence the files server. Same-machine, same-share, no proxies, no server load.
+
+**Trust.** The files server has no login: anyone on the LAN who can reach port 2648 can read the workspace. That's cn4m's model throughout, but unlike the SMB share it doesn't ask for Windows credentials, so keep the port inside the LAN.
 
 ---
 

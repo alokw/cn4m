@@ -585,6 +585,18 @@ def asset_source_path(asset_data, bucket):
     return os.path.join(asset_data["folder"], filename)
 
 
+def asset_relpath(asset_data, bucket):
+    """
+    The same location relative to the workspace root, forward-slashed —
+    "repo/1100/1105_A1_OpeningFilm_v003.mov", "quarantine/foo.mov". This is
+    the part of an asset's address that is the same everywhere the workspace
+    is reachable from: appended to the files server's URL it's the HTTP
+    address, to the SMB share it's the network path. The UI builds both from
+    it; see "Opening assets in a player" in the README.
+    """
+    return os.path.relpath(asset_source_path(asset_data, bucket), cn4m_folder).replace(os.sep, "/")
+
+
 # ── Provenance notes ──────────────────────────────────────────────────────────
 # Notes recording where an asset came from, rather than anything derivable from
 # the file itself. check_asset builds an entry from the file alone, so any code

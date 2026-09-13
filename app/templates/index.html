@@ -140,6 +140,23 @@
         </div>
     </div>
 
+    <!-- Preview dialog. Opened from any table's right-click menu, for files the
+         browser can play natively — see open_preview() in cn4m.js. -->
+    <div id="preview-modal" class="obx-modal" style="display:none;">
+        <div class="obx-modal-card obx-preview-card">
+            <div class="d-flex justify-content-between align-items-center pb-2" style="gap:1rem;">
+                <div class="text-uppercase fw-semibold obx-orange">preview</div>
+                <span class="fw-lighter fs-7 obx-preview-name" id="preview-name"></span>
+            </div>
+            <div class="obx-preview-body" id="preview-body"></div>
+            <div class="fs-7 pt-2 obx-modal-error" id="preview-error"></div>
+            <div class="d-flex justify-content-end pt-3">
+                <button id="preview-open" class="obx-button">OPEN IN PLAYER</button>
+                <button id="preview-close" class="obx-button" style="margin-left:0.5rem;">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
     <div id="tab-quarantine" class="tab-panel" style="display:none;">
         <div class="container rounded-3 px-4 py-3 mb-3 bg-darkish border-darkish">
             <div class="d-flex justify-content-between align-items-center pb-2">
@@ -173,6 +190,8 @@ $(function() { $('.obx-tab').click(function() { show_tab($(this).data('tab')); }
 $(function() { $('#repo-transcode').click(function() { transcode_browse('repo'); }); });
 $(function() { $('#quarantine-transcode').click(function() { transcode_browse('quarantine'); }); });
 $(wire_rename_dialog);
+$(wire_preview_dialog);
+$(load_open_config);
 $(render_suite_rail);
 $(wire_status_history);
 $(wire_cascade_sync);

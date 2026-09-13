@@ -956,6 +956,26 @@ function cell_context_menu(e, cell) {
   const filterable = !!column.getDefinition().headerFilter;
   const value = filterable ? header_filter_value_for(cell) : null;
   const items = [];
+  const row = cell.getData();
+
+  // Ways to get at the file itself come first: they're about the asset, the
+  // rest of the menu is about the table. Each appears only when the .env
+  // setting behind it is present — see open_config.
+  if (open_config.files_url) {
+    items.push({
+      label: "Open in " + escape_html(player_name()),
+      action: () => open_in_player(row),
+    });
+    if (browser_playable(row)) {
+      items.push({ label: "Preview", action: () => open_preview(row) });
+    }
+    items.push({ label: "Copy URL", action: () => copy_text(asset_url(row), "URL") });
+  }
+  const share_path = asset_share_path(row);
+  if (share_path) {
+    items.push({ label: "Copy path", action: () => copy_text(share_path, "path") });
+  }
+  if (items.length) items.push({ separator: true });
 
   // Rename is offered on the review table only — the browse tabs list assets
   // that have already been approved or quarantined, and renaming one of those
@@ -1110,6 +1130,11 @@ function asset_rows(assets_by_id) {
     // order on it so the most recent deliveries are at the top.
     processed: asset.processed || "",
     tracked: !!asset.tracked,  // set by /assets/<bucket>; absent (false) on a scan
+    // Where the file is, relative to the workspace root — what the right-click
+    // menu appends to the files server URL or the share path. The browse
+    // routes supply it (they know a quarantined file has moved); a scan's rows
+    // are all still in the repo at parent/name, so it's derived here.
+    relpath: asset.relpath || ("repo/" + (asset.parent && asset.parent !== "." ? asset.parent + "/" : "") + (asset.name || "")),
     };
     row.qc_fail = row_qc_fails(row);  // stamped once here; the toggle filters on it
     return row;
@@ -1326,6 +1351,158 @@ function transcode_browse(name) {
   transcode_progress_destination = '#' + name + '_progress';
   ajax_post_transcode('/transcode_assets', selected, preset_name);
   table.deselectRow();
+}
+
+
+// ── Opening assets in a player ────────────────────────────────────────────────
+// Right-click a row on any table -> Open in IINA / mpv, Preview, Copy URL, Copy
+// path. The originals, not proxies: nothing is transcoded, cn4m just knows the
+// asset's address in two forms (HTTP, via the files server in
+// tools/files-server; and the SMB share) and hands it to whatever can play it.
+// See "Opening assets in a player" in the README.
+//
+// A web page can't launch a local player with a path, so "Open in" goes
+// through the player's own URL scheme — iina:// on a Mac, mpv-handler://
+// elsewhere — which the browser hands off after an "Open IINA?" prompt. Both
+// take only http URLs, hence the files server. All of this is optional:
+// each menu item appears only when the .env setting it needs is present.
+
+let open_config = { files_url: "", share_windows: "", share_mac: "" };
+
+function load_open_config() {
+  $.getJSON('/open_config', function(data) {
+    open_config = data || open_config;
+  });
+}
+
+function is_mac() {
+  return /Mac|iPhone|iPad/.test(navigator.userAgent);
+}
+
+function player_name() {
+  return is_mac() ? "IINA" : "mpv";
+}
+
+// The asset's HTTP address on the files server. Each path segment is encoded
+// on its own so spaces, # and % in folder or file names survive, while the
+// slashes between them stay slashes.
+function asset_url(row) {
+  return open_config.files_url + "/" + row.relpath.split("/").map(encodeURIComponent).join("/");
+}
+
+// The asset's address on the share, in the form this OS wants: UNC on
+// Windows, the mount path elsewhere. "" when that share isn't configured.
+function asset_share_path(row) {
+  if (is_mac()) {
+    return open_config.share_mac ? open_config.share_mac + "/" + row.relpath : "";
+  }
+  return open_config.share_windows ? open_config.share_windows + "\\" + row.relpath.replace(/\//g, "\\") : "";
+}
+
+// The URL-scheme link the player's handler registers. IINA takes the URL
+// as-is; mpv-handler wants it URL-safe base64 (its README: "/" -> "_",
+// "+" -> "-", no padding) — btoa is fine because the URL is ASCII by now.
+function player_link(url) {
+  if (is_mac()) return "iina://weblink?url=" + encodeURIComponent(url);
+  return "mpv-handler://play/" + btoa(url).replace(/\//g, "_").replace(/\+/g, "-").replace(/=+$/, "");
+}
+
+function open_in_player(row) {
+  // Assigning a custom-scheme URL to location doesn't navigate away — the
+  // browser asks whether to open the handler and the page stays put. If the
+  // handler isn't installed, the browser says nothing, so the rail does.
+  window.location.href = player_link(asset_url(row));
+  set_app_status("Sent " + row.filename + " to " + player_name()
+    + " — nothing opened? " + player_name() + " isn't set up on this machine, see the README",
+    "idle", "", { local: true });
+}
+
+// The clipboard API is only offered on secure origins, and cn4m is plain http
+// on a LAN address, so the deprecated-but-everywhere execCommand path is the
+// one that actually runs here. Both need to happen inside the click.
+function copy_text(text, what) {
+  const done = () => set_app_status("Copied " + what + ": " + text, "idle", "", { local: true });
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done, () => copy_text_fallback(text, done));
+    return;
+  }
+  copy_text_fallback(text, done);
+}
+
+function copy_text_fallback(text, done) {
+  const box = $('<textarea>').val(text)
+    .css({ position: "fixed", top: 0, left: 0, width: "1px", height: "1px", opacity: 0 })
+    .appendTo('body');
+  box[0].select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (err) { ok = false; }
+  box.remove();
+  if (ok) done(); else window.prompt("Copy this:", text);   // last resort: hand it over to select by hand
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+// Inline, in a dialog, for what the browser can play natively — a delivered
+// H.264 mp4, a png, a wav. The extension decides for images and audio; for
+// video the container isn't enough (a .mov holds ProRes as readily as H.264),
+// so the codec the scan recorded decides. Anything else has no Preview item
+// and goes to the player. A file that passes here but still won't play (an
+// HEVC on a machine without hardware decode, say) reports that in the dialog
+// rather than failing silently.
+
+const IMAGE_PREVIEW_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+const AUDIO_PREVIEW_EXTS = ["mp3", "wav", "ogg", "flac", "m4a", "aac"];
+const VIDEO_PREVIEW_EXTS = ["mp4", "m4v", "mov", "webm"];
+const PREVIEW_CODECS = ["avc", "h264", "h.264", "hevc", "h265", "h.265", "vp8", "vp9", "av1"];
+
+function browser_playable(row) {
+  const ext = normalize_ext(row.extension);
+  if (IMAGE_PREVIEW_EXTS.includes(ext) || AUDIO_PREVIEW_EXTS.includes(ext)) return true;
+  if (!VIDEO_PREVIEW_EXTS.includes(ext)) return false;
+  const codec = String(row.video_codec || "").toLowerCase();
+  return PREVIEW_CODECS.some(name => codec.indexOf(name) !== -1);
+}
+
+let preview_row = null;   // the asset in the open preview; null when closed
+
+function wire_preview_dialog() {
+  $('#preview-close').click(close_preview);
+  $('#preview-open').click(function() { if (preview_row) open_in_player(preview_row); });
+  $('#preview-modal').click(function(e) { if (e.target === this) close_preview(); });
+  $(document).keydown(function(e) {
+    if (e.key === "Escape" && preview_row) close_preview();
+  });
+}
+
+function open_preview(row) {
+  const url = asset_url(row);
+  const ext = normalize_ext(row.extension);
+  const body = $('#preview-body').empty();
+  let media;
+  if (IMAGE_PREVIEW_EXTS.includes(ext)) {
+    media = $('<img>', { src: url, alt: row.filename });
+  } else if (AUDIO_PREVIEW_EXTS.includes(ext)) {
+    media = $('<audio>', { src: url, controls: true, autoplay: true });
+  } else {
+    media = $('<video>', { src: url, controls: true, autoplay: true, playsinline: true });
+  }
+  media.on('error', function() {
+    $('#preview-error').text("The browser can't play this file — open it in " + player_name() + " instead.");
+  });
+  body.append(media);
+
+  preview_row = row;
+  $('#preview-name').text(row.filename).attr('title', url);
+  $('#preview-error').text("");
+  $('#preview-open').text("OPEN IN " + player_name().toUpperCase()).toggle(!!open_config.files_url);
+  $('#preview-modal').show();
+}
+
+function close_preview() {
+  preview_row = null;
+  // Removing the element stops playback and the download behind it; hiding
+  // alone would leave an 80 GB file streaming into a dialog nobody can see.
+  $('#preview-body').empty();
+  $('#preview-modal').hide();
 }
 
 

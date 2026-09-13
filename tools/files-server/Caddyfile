@@ -1,0 +1,36 @@
+# cn4m files server
+#
+# Serves the cn4m workspace read-only over plain HTTP so a workstation's player
+# (IINA on a Mac, mpv elsewhere) can open an original straight from the tables'
+# right-click menu, and the browser can preview anything it plays natively.
+# Run with serve.bat, which sets the two environment variables used below; see
+# README.md in this folder, and "Opening assets in a player" in the main README.
+#
+# Why a native server rather than a container: reads through Docker Desktop's
+# bind mount top out around 200 MB/s, which is one ProRes 422 HQ 4K stream with
+# nothing to spare. Read natively the same disk does over 1 GB/s.
+{
+	# No admin API. It would otherwise listen on localhost:2019 for no reason.
+	admin off
+}
+
+:{$CN4M_FILES_PORT:2648} {
+	root * {$CN4M_FILES_ROOT}
+
+	# cn4m's state file and anything dot-prefixed (sync state, Finder litter)
+	# are not media and stay off the wire. Everything else under the workspace
+	# is served exactly as it is on disk.
+	@private path /assets.json* */.*
+	respond @private 404
+
+	# browse = a directory listing, so http://<host>:2648/repo/ in a browser is
+	# a quick way to confirm the server is up and pointing at the right folder.
+	file_server browse
+
+	# Uncomment to see every request in the console. Chatty while a video is
+	# playing — a player fetches in ranges — but useful when something won't open.
+	# log {
+	# 	output stdout
+	# 	format console
+	# }
+}

@@ -161,3 +161,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 .env
+
+# cn4m files server binary (fetched by tools/files-server/get-caddy.bat)
+tools/files-server/caddy.exe
+tools/files-server/*.zip

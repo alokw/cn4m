@@ -461,6 +461,36 @@ body {
 .obx-input:focus {
 	border: 1px solid #F99D38;
 }
+/* Preview dialog — the rename card, widened for a picture. The media fills
+   the width and is capped by the viewport height, letterboxed on black so a
+   portrait clip or a wall-shaped one both sit sensibly. */
+.obx-preview-card {
+	max-width: min(1280px, 94vw);
+}
+
+.obx-preview-name {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+.obx-preview-body video,
+.obx-preview-body img {
+	display: block;
+	width: 100%;
+	max-height: 72vh;
+	object-fit: contain;
+	background-color: #000;
+	border-radius: 4px;
+}
+
+.obx-preview-body audio {
+	display: block;
+	width: 100%;
+	margin: 1rem 0;
+}
+
 /* ── Ingest sections ─────────────────────────────────────────────────────────
    CHECK / REVIEW / TRACK share one pane, revealed as the workflow progresses.
    The rule keys off the *general* sibling combinator rather than the adjacent
