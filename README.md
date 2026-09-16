@@ -302,7 +302,7 @@ Approving or quarantining opens the **TRACK ASSETS** pane.
 **4. Track Assets**
 Click **UPDATE GOOGLE SHEET** to push all approved (not yet tracked) assets to the configured Google Sheet. Both repo and quarantine assets are pushed. Each asset gets a row with status set to `received`, and QC failures are highlighted red in the sheet.
 
-The NOTES column carries the file-type emoji plus where the file came from: `created from …` for a transcode output, `renamed from …` for a file renamed during review, or both.
+The NOTES column carries the file-type emoji plus where the file came from — `created from …` for a transcode output, `renamed from …` for a file renamed during review, or both — and then, after a dash, anything the reviewer typed into the NOTES column on the NEW tab: `🎬 renamed from foo_v2.mov — client wants the darker grade`. See [Notes](#notes).
 
 **Afterwards**
 The **APPROVED** and **QUARANTINED** tabs show everything already in each state, so you can look back over past deliveries, check what's still waiting to reach the sheet, or re-transcode something without scanning it in again. See [Tabs](#tabs).
@@ -364,7 +364,7 @@ Numeric columns accept operators, so you can type:
 
 **Duration filters in seconds and Size filters in MiB** (the units are shown in each box), even though the columns display a timecode and a human-readable size. Files with no value for a column — an audio stem has no width — are excluded whenever that column is filtered.
 
-**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout. On the NEW tab the same menu offers **Rename…** — see [Renaming](#renaming). With a files server configured it also opens the file in a player, previews it, or copies its address — see [Opening assets in a player](#opening-assets-in-a-player).
+**Right-click any cell** for `Filter by "<value>"`, which fills in that column's filter box, plus options to clear that column's filter, clear all filters, or reset the column layout. On the NEW tab the same menu offers **Rename…** and **Edit note…** — see [Renaming](#renaming) and [Notes](#notes). With a files server configured it also opens the file in a player, previews it, or copies its address — see [Opening assets in a player](#opening-assets-in-a-player).
 
 ### Flagged assets
 
@@ -406,6 +406,16 @@ The original filename is recorded on the asset as `renamed from <original>` and 
 
 **If you use cn4m-symmetry:** a rename here only renames the file in the cn4m repo — the symlink source is left untouched, so the two names diverge from that point on. Rename at the source instead if the original name matters downstream.
 
+### Notes
+
+Every table has a NOTES column, after VERSION, showing what the Google Sheet's NOTES cell will say: where the file came from (`renamed from …`, `created from …`), dimmed, and then whatever a reviewer has written about it. The file-type emoji the sheet also gets is left out here — the icon beside NAME already says that.
+
+On the **NEW** tab the column is editable: **double-click** the cell, or right-click and choose **Edit note…**, type, and press Enter (Esc cancels, clicking away also saves). The note is saved against the asset straight away and shown under the table as `Note saved for <file>`; if saving fails, the cell reverts so the table never shows a note the sheet won't get. One line, up to 500 characters; runs of whitespace are collapsed. Clear the cell to remove a note.
+
+When the asset is approved and tracked, the note lands in the sheet after the provenance and a dash — `🎬 renamed from foo_v2.mov — client wants the darker grade` — so what cn4m recorded and what a person said stay tellable apart. A note survives re-checking and renaming, like the provenance does.
+
+**Notes are editable on the NEW tab only.** APPROVED and QUARANTINED show them but don't edit them — what's there has reached the sheet already, or is about to, and the sheet is the place to change it after that.
+
 ### Selecting
 
 Tick rows individually, or use the checkbox in the header to select everything. **Selection follows your filters**: the header checkbox and SELECT ALL FLAGGED only ever touch rows you can currently see.
@@ -432,7 +442,7 @@ QC means looking at the original, not a proxy — so cn4m transcodes nothing for
 
 | Item | What it does | Needs |
 |---|---|---|
-| **Open in IINA** (Mac) / **Open in mpv** (Windows, Linux) | Opens the original in the player, streamed off the files server. The browser asks *"Open IINA?"* the first time; tick *always allow* and it's one click from then on. | `FILES_URL`, and the player set up on the workstation (below) |
+| **Open in IINA** (Mac) / **Open in mpv** (Windows, Linux) | Opens the original in the player, streamed off the files server. The browser asks *"Open IINA?"* the first time; tick *always allow* and it's one click from then on. Each open is recorded in the status rail and [the log](#the-log). | `FILES_URL`, and the player set up on the workstation (below) |
 | **Preview** | Plays it in a dialog in the browser. Only offered for what a browser can play natively — an H.264 mp4, a png, a wav — so a ProRes or NotchLC `.mov` doesn't get one; that's what the player is for. Esc or click outside to close. | `FILES_URL` |
 | **Copy URL** | Copies the HTTP address, for pasting into VLC's *Open Network*, Resolve, a message… | `FILES_URL` |
 | **Copy path** | Copies the file's path on the SMB share, in the form your OS wants — `\\10.10.20.10\specs26\repo\…` on Windows, `/Volumes/specs26/repo/…` on a Mac — for any player that opens files rather than URLs. | `SHARE_PATH_WINDOWS` / `SHARE_PATH_MAC` |
@@ -448,12 +458,15 @@ Each item appears only when its setting is present, so an install without a file
   1. [mpv](https://mpv.io/installation/) — the Windows build. Unzip somewhere permanent, e.g. `C:\Tools\mpv\`.
   2. [mpv-handler](https://github.com/akiirui/mpv-handler/releases) — `mpv-handler-windows-amd64.zip`. Unzip to e.g. `C:\Tools\mpv-handler\`, run `handler-install.bat` (this registers the `mpv-handler://` link — the part the browser needs), then edit its `config.toml` and point it at mpv, backslashes doubled: `mpv = "C:\\Tools\\mpv\\mpv.com"`. Leave `ytdl` out; it's for YouTube-style sites.
 
-  3. Back in cn4m, right-click any cell of the asset's row in the NEW, APPROVED or QUARANTINED table (the same menu that has *Filter by* and *Rename…*) → **Open in mpv**. The browser asks *"Open mpv-handler?"* — tick **Always allow** and it's one click from then on.
+  3. Copy [tools/mpv/mpv.conf](tools/mpv/mpv.conf) to `%APPDATA%\mpv\mpv.conf` (create the folder). Stock mpv reads ahead 150 MiB, which is under a second of a ProRes original — playback pauses every couple of seconds to refill. This file gives it 2 GiB of readahead and a bigger read buffer; the comments in it say what each line does.
+  4. Back in cn4m, right-click any cell of the asset's row in the NEW, APPROVED or QUARANTINED table (the same menu that has *Filter by* and *Rename…*) → **Open in mpv**. The browser asks *"Open mpv-handler?"* — tick **Always allow** and it's one click from then on.
 
   Don't move either folder afterwards — the registration and the config both hold absolute paths.
-- **Linux** — mpv from your package manager and mpv-handler from the AUR or its release page; same `config.toml`.
 
-If **Open in…** appears to do nothing, the handler isn't registered on that machine — the browser has no way to tell the page, so the status rail says as much after each attempt. If the *"Open mpv-handler?"* prompt does appear but nothing plays, the mpv path in `config.toml` is wrong. **Copy path** and **Copy URL** work regardless.
+  If playback still stalls with the config in place, press `i` in mpv for its stats overlay: the *Cache* line shows how far ahead it has read and how fast it is filling, and *Dropped* counts frames the decoder couldn't keep up with. A cache that never gets ahead means the network can't sustain the bitrate — a workstation on 1 GbE tops out around 110 MB/s, below a ProRes 422 HQ 4K stream — while dropped frames with a full cache mean the CPU can't decode it in real time.
+- **Linux** — mpv from your package manager and mpv-handler from the AUR or its release page; same `config.toml`, and the same `mpv.conf` goes in `~/.config/mpv/`.
+
+Each attempt is reported in the status rail and the log: `Opened in mpv: <file>` when the player took it, or `mpv didn't open (see README): <file>` when nothing claimed the link — which means the handler isn't registered on that machine. (The browser never tells the page which happened; cn4m infers it from whether the window lost focus to the player within a couple of seconds, which is reliable in practice but is an inference.) If the *"Open mpv-handler?"* prompt does appear but nothing plays, the mpv path in `config.toml` is wrong. **Copy path** and **Copy URL** work regardless.
 
 Why URL schemes, and why HTTP: a web page cannot launch a local program with a file path — browsers refuse `file://` and `smb://` links from web pages for good reason. What it *can* do is hand a URL to an app that has registered a scheme for it, which is what IINA and mpv-handler provide, and both accept only http URLs — hence the files server. Same-machine, same-share, no proxies, no server load.
 

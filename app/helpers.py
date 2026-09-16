@@ -294,6 +294,39 @@ def _file_type_emoji(ext):
     return ""
 
 
+def provenance_notes(asset):
+    """
+    Where the file came from, as the sheet says it: the name it was renamed out
+    of in the review pane (rename_asset), and the source it was transcoded from
+    (record_transcode_output). Both can apply to one asset — a transcode output
+    that was then renamed. "" when neither applies.
+    """
+    provenance = []
+    if asset.get("created_from"):
+        provenance.append(f"created from {asset['created_from']}")
+    if asset.get("renamed_from"):
+        provenance.append(f"renamed from {asset['renamed_from']}")
+    return "; ".join(provenance)
+
+
+def sheet_notes(asset):
+    """
+    The sheet's NOTES cell: the file type emoji (🎵 🖼️ 🎬), the provenance, and
+    then whatever a reviewer typed into the NOTES column on the NEW tab —
+    "🎬 renamed from foo_v2.mov — client wants the darker grade". The typed
+    part comes last and after a dash, so what cn4m knows and what a person
+    said stay tellable apart in the sheet.
+    """
+    provenance = provenance_notes(asset)
+    system = " ".join(part for part in [_file_type_emoji(asset.get("extension", "")).strip(), provenance] if part)
+    note = " ".join((asset.get("reviewer_note") or "").split())
+    if not note:
+        return system
+    if not system:
+        return note
+    return system + (" — " if provenance else " ") + note
+
+
 def build_google_row(asset):
     """
     Convert an asset dict into a flat list of values matching the sheet column order:
@@ -315,16 +348,7 @@ def build_google_row(asset):
         row.append(prefix + version)
     else:
         row.append("")
-    # NOTES — file type emoji (🎵 🖼️ 🎬) plus where the file came from: the name
-    # it was renamed out of in the review pane (rename_asset), and the source it
-    # was transcoded from (record_transcode_output). Both can apply to one
-    # asset — a transcode output that was then renamed.
-    provenance = []
-    if asset.get("created_from"):
-        provenance.append(f"created from {asset['created_from']}")
-    if asset.get("renamed_from"):
-        provenance.append(f"renamed from {asset['renamed_from']}")
-    row.append(" ".join(part for part in [_file_type_emoji(ext).strip(), "; ".join(provenance)] if part))
+    row.append(sheet_notes(asset))                                            # NOTES — see sheet_notes
     row.append(asset["duration"]) if "duration" in asset else row.append("")
     row.append(ext)
     row.append(asset["video_codec"]) if "video_codec" in asset else row.append("")
@@ -604,7 +628,12 @@ def asset_relpath(asset_data, bucket):
 # or they are silently dropped — which matters because a re-scan re-reads every
 # unreviewed asset, not just newly arrived ones.
 
-PROVENANCE_KEYS = ("created_from", "renamed_from")
+# "reviewer_note" is what a reviewer typed into the NOTES column (set_note in
+# tasks.py). It isn't provenance, but it has exactly the same problem — a
+# re-scan rebuilds the entry from the file and would lose it — so it rides on
+# the same list. Not "note": unreviewed_flags entries already use that key for
+# the flag's own text.
+PROVENANCE_KEYS = ("created_from", "renamed_from", "reviewer_note")
 
 
 def carry_provenance(new_asset, previous_asset, keys=PROVENANCE_KEYS):
@@ -1138,4 +1167,4 @@ def purge_exclude_files(assets):
 
 __all__ = ["ASSETS_JSON", "LEGACY_ASSETS_JSON", "ASSET_BUCKETS", "QUARANTINE_BUCKETS",
            "find_asset", "asset_source_path",
-           "get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "carry_provenance", "record_transcode_output", "claim_transcode_notes", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "validate_asset_filename", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "version_sort_key", "find_version_conflict", "apply_version_flags", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps", "qc_resolution_rules", "qc_resolution_fails"]
+           "get_folder", "ensure_workspace_folders", "get_json_file", "get_files_from_folder", "check_asset", "write_json_file", "carry_provenance", "provenance_notes", "sheet_notes", "record_transcode_output", "claim_transcode_notes", "fast_hash", "move_files", "connect_to_google_sheet", "setup_google_sheet", "update_google_sheet", "build_google_row", "purge_exclude_files", "is_excluded", "validate_asset_filename", "is_folder_excluded", "load_ffmpeg_config", "get_ffmpeg_presets", "run_ffmpeg_preset", "parse_asset_filename", "version_sort_key", "find_version_conflict", "apply_version_flags", "parse_qc_codecs", "parse_qc_resolutions", "parse_qc_fps", "qc_resolution_rules", "qc_resolution_fails"]

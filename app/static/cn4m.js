@@ -31,7 +31,8 @@ let qc_filter_active = false;
 // -v2: bumped when the version conflict column was added at the far left. A
 // persisted -v1 layout knows nothing about it, and Tabulator appends unknown
 // columns to the end — which would bury the caution icon off the right edge.
-const PERSISTENCE_ID = "cn4m-review-v2";
+// -v3: NOTES added after VERSION, for the same reason.
+const PERSISTENCE_ID = "cn4m-review-v3";
 
 // The read-only REPO / QUARANTINE tables, built lazily the first time their tab
 // is opened. Same columns and machinery as the review table — see
@@ -985,6 +986,10 @@ function cell_context_menu(e, cell) {
       label: "Rename&hellip;",
       action: () => open_rename_dialog(cell.getRow()),
     });
+    items.push({
+      label: "Edit note&hellip;",
+      action: () => edit_note(cell.getRow().getCell("note")),
+    });
     items.push({ separator: true });
   }
 
@@ -1045,6 +1050,106 @@ const PROCESSED_COLUMN = {
   ...TEXT_FILTER,
 };
 
+// ── Notes ─────────────────────────────────────────────────────────────────────
+// What the sheet's NOTES cell will say, less the file-type emoji (the icon
+// beside NAME already says that): the provenance, dimmed, then whatever the
+// reviewer typed. The column's field is the typed note alone, so editing the
+// cell edits only that — the provenance is cn4m's and stays put.
+//
+// Editable on the NEW tab only, and only on purpose: a double-click or the
+// right-click menu opens the editor, not a plain click, which on a selectable
+// row is a selection click. Enter or clicking away saves, Esc cancels. The
+// browse tabs show notes but don't edit them — what's there has reached the
+// sheet already, or is about to.
+
+function notes_formatter(cell) {
+  const parts = [];
+  const provenance = cell.getData().provenance;
+  if (provenance) parts.push('<span class="note-system">' + escape_html(provenance) + '</span>');
+  const note = cell.getValue();
+  if (note) parts.push(escape_html(note));
+  return parts.join('<span class="note-sep"> — </span>');
+}
+
+const NOTES_COLUMN = {
+  title: "Notes",
+  field: "note",
+  formatter: notes_formatter,
+  sorter: "string",
+  maxInitialWidth: 280,
+  minWidth: 90,
+  headerTooltip: "goes to the sheet's NOTES column when tracked — double-click to edit on the NEW tab",
+  ...TEXT_FILTER,
+};
+
+function notes_column(editable) {
+  if (!editable) return NOTES_COLUMN;
+  return {
+    ...NOTES_COLUMN,
+    editor: "input",
+    editable: false,                       // never on click — see edit_note
+    editorParams: { elementAttributes: { maxlength: "500" } },
+    cellDblClick: (e, cell) => edit_note(cell),
+    cellEdited: save_note,
+  };
+}
+
+// edit(true) forces the editor open despite editable:false.
+function edit_note(cell) {
+  cell.edit(true);
+}
+
+function save_note(cell) {
+  const row = cell.getData();
+  const note = String(cell.getValue() || "").trim();
+  const before = String(cell.getOldValue() || "");
+  if (note === before) return;
+  $.ajax({
+    type: 'POST',
+    url: '/set_note',
+    data: { fileid: row.fileid, note: note },
+    success: function(data, status, request) {
+      poll_note(request.getResponseHeader('Location'), cell, before);
+    },
+    error: function(XMLHttpRequest, textStatus, errorThrown) {
+      note_failed(cell, before, "Note not saved: " + textStatus + ': ' + errorThrown);
+    },
+  });
+}
+
+// Same shape as poll_rename: no progress worth showing, so a plain re-poll.
+function poll_note(status_url, cell, before) {
+  $.getJSON(status_url, function(data) {
+    if (data['state'] === 'PENDING' || data['state'] === 'PROGRESS') {
+      setTimeout(() => poll_note(status_url, cell, before), 200);
+      return;
+    }
+    if (data['state'] === 'FAILURE') {
+      note_failed(cell, before, "Note not saved: " + data['status']);
+      return;
+    }
+    const result = data['result'] || {};
+    if (result.error) {
+      note_failed(cell, before, "Note not saved: " + result.error);
+      return;
+    }
+    // The worker collapses whitespace; show what it kept. row.update rather
+    // than cell.setValue, which would count as another edit and save again.
+    if (result.note !== cell.getValue()) cell.getRow().update({ note: result.note });
+    $('#review_asset_progress').html(result.note
+      ? "Note saved for <b>" + escape_html(result.name) + "</b>"
+      : "Note cleared for <b>" + escape_html(result.name) + "</b>");
+  }).fail(function() {
+    note_failed(cell, before, "Note not saved: lost contact with the task");
+  });
+}
+
+// Put back what was there, so the table never shows a note the sheet won't get.
+function note_failed(cell, before, message) {
+  cell.getRow().update({ note: before });
+  $('#review_asset_progress').text(message);
+}
+
 const TRACKED_COLUMN = {
   title: "Tracked",
   field: "tracked",
@@ -1070,6 +1175,7 @@ function asset_columns(options) {
     { title: "Name",          field: "name",           formatter: name_formatter,    maxInitialWidth: 340, ...TEXT_FILTER },
     { title: "Screen / Stem", field: "screen",         sorter: screen_sorter,        maxInitialWidth: 180, ...LIST_FILTER },
     { title: "Version",       field: "version",        formatter: version_formatter, sorter: "alphanum",   ...LIST_FILTER },
+    notes_column(!!(options && options.notes_editable)),
     { title: "Ext",           field: "extension",      ...LIST_FILTER },
     { title: "Duration",      field: "duration",       sorter: raw_number_sorter("duration_ms"), ...number_filter("duration_ms", 1000, "= > < sec") },
     { title: "Codec",         field: "video_codec",    formatter: codec_formatter,   ...LIST_FILTER },
@@ -1108,6 +1214,14 @@ function asset_rows(assets_by_id) {
     screen: asset.screen || "",
     version: asset.version || "",
     is_version_up: !!asset.is_version_up,
+    // What a reviewer typed in the NOTES column, and where the file came from.
+    // provenance mirrors provenance_notes() in helpers.py, which is what the
+    // sheet gets; the column shows it dimmed ahead of the note.
+    note: asset.reviewer_note || "",
+    provenance: [
+      asset.created_from ? "created from " + asset.created_from : "",
+      asset.renamed_from ? "renamed from " + asset.renamed_from : "",
+    ].filter(Boolean).join("; "),
     // Flattened out of the version_conflict object so the column can sort and
     // filter on the kind while the formatter still has the peer to name.
     conflict: (asset.version_conflict && asset.version_conflict.kind) || "",
@@ -1321,7 +1435,8 @@ function load_browse_tab(name) {
         // store column order, and Tabulator appends columns they don't know
         // about to the end — which would strand FILENAME past every technical
         // column instead of next to NAME. (-v2 was TRACKED moving to the end.)
-        persistence_id: "cn4m-" + name + "-v3",
+        // -v4: NOTES added after VERSION.
+        persistence_id: "cn4m-" + name + "-v4",
         placeholder: "No " + BROWSE_LABELS[name] + " assets.",
       });
     })
@@ -1407,14 +1522,39 @@ function player_link(url) {
   return "mpv-handler://play/" + btoa(url).replace(/\//g, "_").replace(/\+/g, "-").replace(/=+$/, "");
 }
 
+// How long after firing the link to wait for the window to lose focus before
+// concluding nothing claimed it. The hand-off is near-instant when it happens;
+// the wait only has to cover a slow machine bringing the player up.
+const OPEN_HANDOFF_MS = 2500;
+
 function open_in_player(row) {
+  const player = player_name();
   // Assigning a custom-scheme URL to location doesn't navigate away — the
-  // browser asks whether to open the handler and the page stays put. If the
-  // handler isn't installed, the browser says nothing, so the rail does.
+  // browser hands the link to the registered app and the page stays put. It
+  // never says whether anything took it, though, so the outcome is inferred:
+  // when the player launches (or the browser's own "Open mpv-handler?"
+  // dialog steps in front), this window loses focus. No blur inside the
+  // window means no handler is registered on this machine — the browser has
+  // quietly dropped the link.
+  let handed_off = false;
+  const noticed = function() { handed_off = true; };
+  $(window).on('blur.cn4m-open', noticed);
+  $(document).on('visibilitychange.cn4m-open', function() { if (document.hidden) noticed(); });
+
   window.location.href = player_link(asset_url(row));
-  set_app_status("Sent " + row.filename + " to " + player_name()
-    + " — nothing opened? " + player_name() + " isn't set up on this machine, see the README",
-    "idle", "", { local: true });
+
+  setTimeout(function() {
+    $(window).off('blur.cn4m-open');
+    $(document).off('visibilitychange.cn4m-open');
+    // Filename last on both: the rail truncates from the right, and which
+    // player and whether it worked matter more than the name, which the
+    // tooltip and the log carry in full either way.
+    if (handed_off) {
+      set_app_status("Opened in " + player + ": " + row.filename, "ok");
+    } else {
+      set_app_status(player + " didn't open (see README): " + row.filename, "warning");
+    }
+  }, OPEN_HANDOFF_MS);
 }
 
 // The clipboard API is only offered on secure origins, and cn4m is plain http
@@ -1695,6 +1835,7 @@ function render_asset_table(assets_by_id) {
     data: rows,
     selectable: true,
     conflicts: true,     // caution column for equal/higher versions already held
+    notes_editable: true,  // the only table where a note can still change what the sheet gets
     persistence_id: PERSISTENCE_ID,
     placeholder: "No new assets found.",
   });

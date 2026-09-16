@@ -815,6 +815,35 @@ body {
 	padding: 0 3px;
 }
 
+/* NOTES — the provenance cn4m recorded sits dimmed ahead of the reviewer's
+   own words, so the two read as different voices in one cell. */
+.note-system {
+	color: #7a7a7a;
+	font-style: italic;
+}
+
+.note-sep {
+	color: #5a5a5a;
+}
+
+/* The inline editor, restyled from the theme's light input to match the
+   header filter boxes. Tabulator sizes it to the cell. */
+.tabulator-row .tabulator-cell.tabulator-editing {
+	border: 1px solid #F99D38;
+	padding: 0;
+}
+
+.tabulator-row .tabulator-cell.tabulator-editing input {
+	background: #1a1a1a;
+	color: #dfdfdf;
+	border: none;
+	outline: none;
+	padding: 0 5px;
+	font: inherit;
+	height: 100%;
+	width: 100%;
+}
+
 .cell-icon {
 	height: 1em;
 	vertical-align: middle;

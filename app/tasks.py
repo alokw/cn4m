@@ -484,9 +484,10 @@ def rename_asset(self, fileid, new_name):
         if renamed["name"] != original:
             renamed["renamed_from"] = original
         # renamed_from is decided just above — including the case where renaming
-        # back to the original name clears it — so only the transcode note is
-        # carried over from the entry check_asset just rebuilt.
-        carry_provenance(renamed, asset, keys=("created_from",))
+        # back to the original name clears it — so only the transcode note and
+        # the reviewer's note are carried over from the entry check_asset just
+        # rebuilt.
+        carry_provenance(renamed, asset, keys=("created_from", "reviewer_note"))
 
     unreviewed.update(rescanned)
 
@@ -573,6 +574,39 @@ def track_assets(self):
 
 # ── Clear flags ───────────────────────────────────────────────────────────────
 
+# ── Notes ─────────────────────────────────────────────────────────────────────
+
+@celery.task(bind=True)
+def set_note(self, fileid, note):
+    """
+    Save what a reviewer typed into the NOTES column against the asset, so it
+    reaches the Google Sheet's NOTES cell when the asset is tracked (see
+    sheet_notes in helpers.py). Whitespace is collapsed — the column is one
+    line, and so is the cell. An empty note removes the field rather than
+    storing "". Any bucket is accepted, though the UI only edits on the NEW tab.
+    Stored as "reviewer_note" — "note" is taken, by the flag text on
+    unreviewed_flags entries.
+
+    A task rather than a route for the same reason rename is: the web
+    container's workspace mount is read-only.
+    """
+    assets = get_json_file(ASSETS_JSON)
+    asset, bucket = find_asset(assets, fileid)
+    if not asset:
+        return {"current": 1, "total": 1, "status": "COMPLETE",
+                "result": {"error": "That asset isn't in the list any more — run the check again."}}
+
+    note = " ".join((note or "").split())
+    if note:
+        asset["reviewer_note"] = note
+    else:
+        asset.pop("reviewer_note", None)
+    write_json_file(assets, "assets.json")
+
+    return {"current": 1, "total": 1, "status": "COMPLETE",
+            "result": {"fileid": fileid, "note": note, "name": asset.get("name", "")}}
+
+
 @celery.task(bind=True)
 def clear_flags(self):
     """
@@ -593,4 +627,4 @@ def clear_flags(self):
 
 
 # Explicitly define what gets imported when using `from app.tasks import *`
-__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "transcode_assets", "quarantine_and_transcode", "rename_asset"]
+__all__ = ["check_assets", "approve_assets", "quarantine_assets", "track_assets", "clear_flags", "transcode_assets", "quarantine_and_transcode", "rename_asset", "set_note"]

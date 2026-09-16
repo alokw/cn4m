@@ -158,6 +158,12 @@ def run_rename_asset():
     task = rename_asset.delay(request.form.get('fileid'), request.form.get('new_name'))
     return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
 
+@main.route('/set_note', methods=['POST'])
+def run_set_note():
+    """Save a reviewer's note against an asset (the NOTES column on the NEW tab)."""
+    task = set_note.delay(request.form.get('fileid'), request.form.get('note'))
+    return jsonify({}), 202, {'Location': url_for('main.taskstatus', task_id=task.id)}
+
 @main.route('/clear_flags', methods=['POST'])
 def run_clear_flags():
     """Archive the current unreviewed flags so the panel resets for the next scan."""
